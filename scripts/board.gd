@@ -297,17 +297,17 @@ func _cell_to_grid_coords(pos: Vector2) -> Vector2i:
 	var board_pixel_height = board_height * cell_size + (board_height - 1) * padding
 	var offset_x = -board_pixel_width / 2.0 + cell_size / 2.0
 	var offset_y = -board_pixel_height / 2.0 + cell_size / 2.0
-	
+
 	var local_x = pos.x - offset_x
 	var local_y = pos.y - offset_y
-	
-	var x = int(local_x / (cell_size + padding))
-	var y = int(local_y / (cell_size + padding))
-	
-	x = clamp(x, 0, board_width - 1)
-	y = clamp(y, 0, board_height - 1)
-	
-	return Vector2i(x, y)
+
+	var stride: float = cell_size + padding
+	var x = int(floor(local_x / stride))
+	var y = int(floor(local_y / stride))
+
+	if x >= 0 && x < board_width && y >= 0 && y < board_height:
+		return Vector2i(x, y)
+	return Vector2i(-1, -1)
 
 func _is_adjacent(a: Vector2i, b: Vector2i) -> bool:
 	return (abs(a.x - b.x) == 1 && a.y == b.y) || (abs(a.y - b.y) == 1 && a.x == b.x)
@@ -378,7 +378,7 @@ func _animate_swap(a: Vector2i, b: Vector2i) -> void:
 	var gem_b = _get_gem_instance(b.x, b.y)
 	if gem_a == null || gem_b == null:
 		# Fallback to instant refresh
-		call_deferred("_refresh_after_swap")
+		call_deferred("_sync_board_state")
 		return
 	
 	var pos_a = _get_cell_position(a.x, a.y)
@@ -717,6 +717,14 @@ func _check_for_new_matches() -> void:
 	_update_hover_highlight()
 	is_animating = false
 
+func _sync_board_state() -> void:
+	# Sync visual board state with board_sim after animations
+	refresh_board()
+	_update_cursor_highlight()
+	_update_hover_highlight()
+	is_animating = false
+	is_processing_swap = false
+
 # Signal handlers for match resolution and effects
 func _on_match_resolved(cleared_cells: Array[Vector2i], gem_kind: int, cascade_depth: int) -> void:
 	last_match_count += cleared_cells.size()
@@ -834,19 +842,22 @@ func _run_coord_self_test() -> void:
 	]
 	
 	for cell in test_cells:
-		var pos = _get_cell_position(cell.x, cell.y)
+		# _get_cell_position returns TOP-LEFT of cell, not center
+		var pos_tl = _get_cell_position(cell.x, cell.y)
+		var pos = pos_tl + Vector2(cell_size / 2.0, cell_size / 2.0)  # actual center
+		
 		# Test center of cell
 		var resolved = _cell_to_grid_coords(pos)
 		var passed = resolved == cell
 		
 		# Test point 20% from top-left (well inside cell)
 		var inset = cell_size * 0.2
-		var tl_pos = pos - Vector2(cell_size/2.0 - inset, cell_size/2.0 - inset)
+		var tl_pos = pos_tl + Vector2(inset, inset)
 		var tl_resolved = _cell_to_grid_coords(tl_pos)
 		var tl_passed = tl_resolved == cell
 		
 		# Test point 20% from bottom-right (well inside cell)
-		var br_pos = pos + Vector2(cell_size/2.0 - inset, cell_size/2.0 - inset)
+		var br_pos = pos_tl + Vector2(cell_size - inset, cell_size - inset)
 		var br_resolved = _cell_to_grid_coords(br_pos)
 		var br_passed = br_resolved == cell
 		
