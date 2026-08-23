@@ -1,0 +1,10 @@
+Level(
+  id: "campaign-008",
+  name: "Last Stand",
+  grid: GridSize(width: 8, height: 8),
+  gem_types: ["circle", "triangle", "square", "diamond", "star", "cross"],
+  blockers: [],
+  objective: Survival(max_moves: 30),
+  relic_pool_tags: ["descent-early"],
+  seed_override: Some(8),
+)

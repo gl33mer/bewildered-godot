@@ -1,0 +1,17 @@
+Level(
+  id: "campaign-007",
+  name: "Deep Freeze",
+  grid: GridSize(width: 8, height: 8),
+  gem_types: ["circle", "triangle", "square", "diamond"],
+  blockers: [
+    Blocker(pos: (1, 1), kind: Ice(hits: 3)),
+    Blocker(pos: (1, 6), kind: Ice(hits: 2)),
+    Blocker(pos: (6, 1), kind: Ice(hits: 2)),
+    Blocker(pos: (6, 6), kind: Crate(hits: 1)),
+    Blocker(pos: (3, 3), kind: Crate(hits: 1)),
+    Blocker(pos: (4, 4), kind: Ice(hits: 1)),
+  ],
+  objective: Descent(blockers_to_clear: 6),
+  relic_pool_tags: ["descent-early"],
+  seed_override: Some(7),
+)

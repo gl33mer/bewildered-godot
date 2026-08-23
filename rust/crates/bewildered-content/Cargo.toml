@@ -1,0 +1,23 @@
+[package]
+name = "bewildered-content"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bewildered-core = { path = "../bewildered-core" }
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.8"
+zip = "2.0"
+anyhow = "1.0"
+include_dir = "0.7"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3.0"
+
+[features]
+embedded-campaign = []
+
+[[test]]
+name = "content_roundtrip"
+path = "tests/content_roundtrip.rs"

@@ -1,0 +1,18 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Rust build artifacts
+rust/target/
+rust/Cargo.lock
+
+# Godot import files (optional - usually committed)
+*.import
+
+# Temporary files
+*.tmp
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

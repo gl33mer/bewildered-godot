@@ -1,0 +1,23 @@
+[package]
+name = "bewildered-solver"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bewildered_solver"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bewildered-solver"
+path = "src/main.rs"
+
+[dependencies]
+bewildered-core = { path = "../bewildered-core" }
+bewildered-content = { path = "../bewildered-content" }
+clap = { version = "4.0", features = ["derive"] }
+anyhow = "1.0"
+rand = { version = "0.8", features = ["std"] }
+rand_chacha = "0.10"
+ron = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

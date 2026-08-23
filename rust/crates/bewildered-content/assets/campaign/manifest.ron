@@ -1,0 +1,131 @@
+Pack(
+  id: "default-campaign",
+  title: "Bewildered Campaign",
+  author: "Bewildered Team",
+  levels: [
+    "campaign-001",
+    "campaign-002",
+    "campaign-003",
+    "campaign-004",
+    "campaign-005",
+    "campaign-006",
+    "campaign-007",
+    "campaign-008",
+  ],
+  relic_pools: {
+    "descent-early": [
+      Relic(
+        id: "relic-echo-chamber",
+        name: "Echo Chamber",
+        description: "Matches leave +1 extra echo charge.",
+        effect: EchoChamber(extra_moves: 1),
+      ),
+      Relic(
+        id: "relic-swift-hands",
+        name: "Swift Hands",
+        description: "Gain +1 move at the start of each level.",
+        effect: ExtraMoves(count: 1),
+      ),
+      Relic(
+        id: "relic-gem-magnet",
+        name: "Gem Magnet",
+        description: "Collection objectives require 10% fewer gems.",
+        effect: CollectionBonus(reduction_pct: 10),
+      ),
+      Relic(
+        id: "relic-diagonal-sight",
+        name: "Diagonal Sight",
+        description: "Diagonal 3-in-a-rows also count as matches.",
+        effect: DiagonalMatches,
+      ),
+      Relic(
+        id: "relic-fifth-hue",
+        name: "Fifth Hue",
+        description: "A 5th gem color enters the pool (harder matches, more specials).",
+        effect: FifthHue,
+      ),
+      Relic(
+        id: "relic-corner-cutter",
+        name: "Corner Cutter",
+        description: "Clearing a board corner cell refunds one move.",
+        effect: CornerCutter,
+      ),
+      Relic(
+        id: "relic-greedy-nova",
+        name: "Greedy Nova",
+        description: "Nova gems clear one fewer color-match minimum but grant no move refund.",
+        effect: GreedyNova,
+      ),
+    ],
+    "descent-mid": [
+      Relic(
+        id: "relic-score-bonus",
+        name: "Score Bonus",
+        description: "All scores increased by 15%.",
+        effect: ScoreBonus(bonus_pct: 0.15),
+      ),
+      Relic(
+        id: "relic-prism-master",
+        name: "Prism Master",
+        description: "Prism gems clear 1 extra cell in each direction.",
+        effect: PrismMaster(extra_clears: 1),
+      ),
+      Relic(
+        id: "relic-bolt-master",
+        name: "Bolt Master",
+        description: "Bolt gems extend 2 extra cells.",
+        effect: BoltMaster(extra_length: 2),
+      ),
+      Relic(
+        id: "relic-nova-master",
+        name: "Nova Master",
+        description: "Nova gems affect 1 additional color.",
+        effect: NovaMaster(extra_colors: 1),
+      ),
+      Relic(
+        id: "relic-shield-bearer",
+        name: "Shield Bearer",
+        description: "Start each chamber with 2 blocker shields.",
+        effect: ShieldBearer(blocks_per_chamber: 2),
+      ),
+      Relic(
+        id: "relic-time-dilation",
+        name: "Time Dilation",
+        description: "Gain 30 extra seconds per level (Survival mode).",
+        effect: TimeDilation(extra_seconds: 30),
+      ),
+      Relic(
+        id: "relic-gambler",
+        name: "Gambler",
+        description: "High risk, high reward: 25% chance for double score, 25% chance for half score.",
+        effect: Gambler(risk_pct: 25, reward_pct: 100),
+      ),
+    ],
+    "descent-late": [
+      Relic(
+        id: "relic-echo-chamber-2",
+        name: "Echo Chamber II",
+        description: "Matches leave +2 extra echo charges.",
+        effect: EchoChamber(extra_moves: 2),
+      ),
+      Relic(
+        id: "relic-swift-hands-2",
+        name: "Swift Hands II",
+        description: "Gain +2 moves at the start of each level.",
+        effect: ExtraMoves(count: 2),
+      ),
+      Relic(
+        id: "relic-gem-magnet-2",
+        name: "Gem Magnet II",
+        description: "Collection objectives require 20% fewer gems.",
+        effect: CollectionBonus(reduction_pct: 20),
+      ),
+      Relic(
+        id: "relic-diagonal-sight-2",
+        name: "Diagonal Sight II",
+        description: "Diagonal matches count and create special gems.",
+        effect: DiagonalMatches,
+      ),
+    ],
+  },
+)

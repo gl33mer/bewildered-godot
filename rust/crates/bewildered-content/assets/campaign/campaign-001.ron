@@ -1,0 +1,10 @@
+Level(
+  id: "campaign-001",
+  name: "First Steps",
+  grid: GridSize(width: 8, height: 8),
+  gem_types: ["circle", "triangle", "square", "diamond"],
+  blockers: [],
+  objective: ScoreTarget(points: 5000, max_moves: 20),
+  relic_pool_tags: ["descent-early"],
+  seed_override: Some(1),
+)
