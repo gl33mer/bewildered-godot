@@ -148,6 +148,53 @@ Combo: 3, Resonance: 1.00
 - `project.godot` — Updated run/main_scene
 
 **Next Stage**: Stage 3 — Input & Core Playable Loop
-- Implement mouse/keyboard selection & swap input
-- Wire `try_swap` to signal handlers for instant grid refresh
-- Capture MCP screenshot and test a full clear
+
+---
+
+### Stage 3 — Input & Core Playable Loop ✅ COMPLETE
+
+**Date**: 2026-08-23
+
+**Summary**:
+- Implemented full mouse/touch and keyboard input handling in `scripts/board.gd`
+- Added visual feedback for selection, cursor, and rejection
+- Verified via MCP: game runs without errors, screenshot captured (640×359)
+
+**Input System** (`scripts/board.gd`):
+| Input Method | Action | Visual Feedback |
+|--------------|--------|-----------------|
+| **Mouse/Touch** | Click gem → select | White 2px border highlight |
+| | Click adjacent gem → swap | Immediate grid refresh on success |
+| | Click non-adjacent → transfer selection | Selection moves to new gem |
+| | Click selected gem → deselect | Highlight disappears |
+| **Keyboard** | Arrow/WASD → move cursor | Cyan 1px border highlight |
+| | Space/Enter on unselected → select | White highlight on cursor cell |
+| | Space/Enter on selected → deselect | Highlight disappears |
+| | Space/Enter on adjacent → swap | Grid refresh on success |
+
+**Rejection Feedback** (`move_rejected` signal):
+- Triggers on: out-of-bounds, non-adjacent, no-match swaps
+- Visual: Red flash on both cells (modulate R=1, G/B fade to 0.2)
+- Duration: 0.3 seconds with linear fade-out
+- Auto-clears and restores normal modulate
+
+**Core Loop Integration**:
+- `try_swap()` returns `bool` → `true` = success, `false` = rejected
+- On success: `call_deferred("_refresh_after_swap")` → `refresh_board()` → visual sync
+- On failure: `move_rejected` signal fires → rejection flash
+- `echo_charged` / `echo_detonated` signals update gem visuals on next refresh
+- Selection/cursor highlights persist across board refreshes via z-index layering
+
+**MCP Verification**:
+- Game viewport screenshot captured: 640×359 (original 929×522)
+- Grid renders correctly with all highlights
+- No script errors during runtime
+
+**Key Files Modified**:
+- `scripts/board.gd` — Complete input handling, signal connections, visual feedback
+- `scenes/main.tscn` — Fixed instance reference
+
+**Next Stage**: Stage 4 — Juice & Animations
+- Add Tween animations for swap, fall, and clear
+- Add GPUParticles2D for gem shatter and resonance echo detonation
+- Capture MCP screenshots

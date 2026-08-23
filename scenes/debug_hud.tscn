@@ -1,0 +1,101 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/debug_hud.gd" id="1_0"]
+
+[node name="DebugHUD" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = -10.0
+offset_bottom = -10.0
+offset_left = 10.0
+offset_top = 10.0
+script = ExtResource("1_0")
+
+[node name="Panel" type="Panel" parent="DebugHUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 0.0
+offset_bottom = 0.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = -10.0
+offset_bottom = -10.0
+offset_left = 10.0
+offset_top = 10.0
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="VBoxContainer"]
+text = "DEBUG HUD"
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+custom_minimum_size = Vector2(0, 24)
+
+[node name="Separator" type="HSeparator" parent="VBoxContainer"]
+
+[node name="HoverLabel" type="Label" parent="VBoxContainer"]
+name = "HoverLabel"
+text = "Hover: None"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="SelectedLabel" type="Label" parent="VBoxContainer"]
+name = "SelectedLabel"
+text = "Selected: None"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="CursorLabel" type="Label" parent="VBoxContainer"]
+name = "CursorLabel"
+text = "Cursor: (0, 0)"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="ActionLog" type="Label" parent="VBoxContainer"]
+name = "ActionLog"
+text = "Action: Waiting for input..."
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="MovesLabel" type="Label" parent="VBoxContainer"]
+name = "MovesLabel"
+text = "Moves: 0"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="ScoreLabel" type="Label" parent="VBoxContainer"]
+name = "ScoreLabel"
+text = "Score: 0"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="ComboLabel" type="Label" parent="VBoxContainer"]
+name = "ComboLabel"
+text = "Combo: 0"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="CascadeLabel" type="Label" parent="VBoxContainer"]
+name = "CascadeLabel"
+text = "Last Cascade: -"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="MultiplierLabel" type="Label" parent="VBoxContainer"]
+name = "MultiplierLabel"
+text = "Multiplier: 1.00x"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0
+
+[node name="CoordTestLabel" type="Label" parent="VBoxContainer"]
+name = "CoordTestLabel"
+text = "Coord Test: Not run"
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 0

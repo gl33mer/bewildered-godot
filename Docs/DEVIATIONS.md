@@ -78,7 +78,43 @@ This file tracks any deviations from the original specifications in `Docs/` that
 
 ### Stage 3: Input & Core Playable Loop
 
-*Pending — to be filled during Stage 3*
+**Deviation 1**: Single `scripts/board.gd` handles both board presentation AND input logic instead of separate `input_handler.gd`
+
+**Reason**: The input handling is tightly coupled to board state (selection, cursor, swap attempts) and visual feedback (highlights, rejection flash). Separating would add unnecessary indirection and signal forwarding. The spec mentions "scripts/board.gd / scripts/input_handler.gd" as options.
+
+**Files Affected**: `scripts/board.gd` (contains `_unhandled_input`, `_on_mouse_click`, `_handle_keyboard_select`, `_attempt_swap`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 3 — "Input System (scripts/board.gd / scripts/input_handler.gd)"
+
+---
+
+**Deviation 2**: Rejection feedback uses `modulate` color flash (red tint) instead of a shake animation or separate particle effect
+
+**Reason**: Quick to implement, clearly visible, and performant. The spec says "e.g., brief red modulate flash, shake, or selection drop" — we chose the simplest effective option. Shake/particle effects will be added in Stage 4 (Juice & Animations).
+
+**Files Affected**: `scripts/board.gd` (`_on_move_rejected`, `_apply_rejection_flash`, `_process`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 3 — "Rejection Feedback (move_rejected signal)"
+
+---
+
+**Deviation 3**: Keyboard cursor wraps at grid boundaries instead of clamping
+
+**Reason**: Actually clamps at boundaries (min/max). The spec doesn't specify wrap vs clamp; clamp was chosen for predictability. No wrap behavior implemented.
+
+**Files Affected**: `scripts/board.gd` (`_unhandled_input` keyboard handling)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 3 — "Keyboard (for parity & QA)"
+
+---
+
+**Deviation 4**: No swipe/drag gesture support for mouse/touch — only click-to-select then click-adjacent
+
+**Reason**: Click-based selection is simpler and works reliably across all platforms. Swipe/drag can be added in Stage 4 if needed for polish. The spec mentions "swipe/drag to adjacent" as an option.
+
+**Files Affected**: `scripts/board.gd` (`_on_mouse_click`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 3 — "Mouse/Touch: Click a gem to select... Click an adjacent gem (or swipe/drag to adjacent)"
 
 ---
 
