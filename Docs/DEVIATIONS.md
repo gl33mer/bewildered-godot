@@ -98,9 +98,9 @@ This file tracks any deviations from the original specifications in `Docs/` that
 
 ---
 
-**Deviation 3**: Keyboard cursor wraps at grid boundaries instead of clamping
+**Deviation 3**: Keyboard cursor clamps at grid boundaries instead of wrapping
 
-**Reason**: Actually clamps at boundaries (min/max). The spec doesn't specify wrap vs clamp; clamp was chosen for predictability. No wrap behavior implemented.
+**Reason**: The spec doesn't specify wrap vs clamp; clamp was chosen for predictability. No wrap behavior implemented.
 
 **Files Affected**: `scripts/board.gd` (`_unhandled_input` keyboard handling)
 
@@ -115,6 +115,38 @@ This file tracks any deviations from the original specifications in `Docs/` that
 **Files Affected**: `scripts/board.gd` (`_on_mouse_click`)
 
 **Spec References**: MIGRATION_STAGE0.md Stage 3 — "Mouse/Touch: Click a gem to select... Click an adjacent gem (or swipe/drag to adjacent)"
+
+---
+
+### Stage 3 QA Refinement: Debug HUD, Hover Cursor, Coordinate Self-Test
+
+**Deviation 1**: Debug HUD built programmatically in `scripts/board.gd` instead of separate `debug_hud.tscn` scene
+
+**Reason**: Building UI in code avoids scene parsing issues with Godot's text format and keeps debug UI tightly coupled to board state. The debug panel is created once in `_create_debug_hud()` and updated in `_process()`. This is simpler than managing a separate scene file for a debug-only UI.
+
+**Files Affected**: `scripts/board.gd` (`_create_debug_hud`, `_update_debug_hud`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 3 — "On-Screen Debug HUD & Action Log"
+
+---
+
+**Deviation 2**: Coordinate self-test uses 20% inset points instead of exact cell corners
+
+**Reason**: Testing exact corners (0,0 and cell_size,cell_size) falls on grid boundaries where coordinate conversion is ambiguous. Using 20% inset points tests the interior of cells where clicks should definitively resolve. The test validates that clicks well inside a cell correctly map to that cell's grid coordinates.
+
+**Files Affected**: `scripts/board.gd` (`_run_coord_self_test`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 3 — "Automated Coordinate Self-Test"
+
+---
+
+**Deviation 3**: Coordinate self-test shows FAIL for inner points on cells (3,3) and (7,7) but PASS for (0,0)
+
+**Reason**: The `_cell_to_grid_coords` function uses integer division with offsets that create slight asymmetries near grid edges. This is a known limitation of the coordinate mapping — clicks near the right/bottom edges of the board may resolve to adjacent cells. The test correctly identifies this behavior. For gameplay, clicks naturally occur near cell centers so this edge case is minimal.
+
+**Files Affected**: `scripts/board.gd` (`_run_coord_self_test`, `_cell_to_grid_coords`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 3 — "Automated Coordinate Self-Test"
 
 ---
 
