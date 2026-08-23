@@ -152,7 +152,33 @@ This file tracks any deviations from the original specifications in `Docs/` that
 
 ### Stage 4: Juice & Animations
 
-*Pending — to be filled during Stage 4*
+**Deviation 1**: Particle effects implemented with Sprite2D-based flash effects instead of GPUParticles2D
+
+**Reason**: GPUParticles2D in Godot 4.7.2 has API differences — `spread` expects a float but the API is inconsistent. The Sprite2D approach (procedural flash sprites) provides equivalent visual results with zero external dependencies and full control over the effect.
+
+**Files Affected**: `scripts/board.gd` (`_spawn_clear_particles`, `_spawn_echo_particles`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 4 — "Particle Effects (GPUParticles2D)"
+
+---
+
+**Deviation 2**: Cascade sequencing driven by board_sim's internal cascade loop rather than explicit signal-per-cascade
+
+**Reason**: The `bewildered-core::Board::try_swap()` already processes all cascades internally in a single call and emits signals for each match. The Godot side processes the signals as they come, animating each clear sequentially. This is simpler than managing explicit cascade state in Godot and matches the core's deterministic behavior.
+
+**Files Affected**: `scripts/board.gd` (`_on_match_resolved`, `_animate_clear`, `_animate_gravity_fall`, `_animate_new_gems_spawn`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 4 — "Core Simulation Loop & State Updates"
+
+---
+
+**Deviation 3**: `is_animating` flag guards all input (not just during active tweens)
+
+**Reason**: The flag is set true at the start of any animation sequence (swap, clear, fall, spawn) and cleared only after the full cascade sequence completes. This prevents any input from interrupting the visual flow, which could desync the board state. The spec mentions "Set an `is_animating` flag to lock player clicks" — we apply it broadly to all animation phases.
+
+**Files Affected**: `scripts/board.gd` (`is_animating`, `_unhandled_input`, `_on_mouse_click`, all animation functions)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 4 — "Input Guarding & Cascade Sequencing"
 
 ---
 

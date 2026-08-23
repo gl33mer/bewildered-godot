@@ -258,3 +258,77 @@ Results: All 3 cells pass center test. Inner points pass for (0,0) but fail for 
 - Add Tween animations for swap, fall, and clear
 - Add GPUParticles2D for gem shatter and resonance echo detonation
 - Capture MCP screenshots
+
+---
+
+### Stage 4 — Juice & Animations ✅ COMPLETE
+
+**Date**: 2026-08-23
+
+**Summary**:
+- Implemented full animation pipeline using Godot Tweens
+- Added input guarding with `is_animating` flag
+- Implemented cascade sequencing (clear → gravity fall → new gems → check matches)
+- Built particle effects using Sprite2D-based flash effects (GPUParticles2D had API issues)
+- Verified via MCP: Game runs without script errors, animations trigger on matches
+
+**Animation Pipeline** (`scripts/board.gd`):
+| Animation | Duration | Easing | Description |
+|-----------|----------|--------|-------------|
+| **Swap** | 0.12s | TRANS_QUAD, EASE_OUT | Smooth slide between positions |
+| **Rejection Snap-Back** | 0.12s | QUAD_OUT + QUAD_IN | Slide to swap pos, return with red flash |
+| **Clear** | 0.15s | QUAD_IN | Scale to 0 + fade out |
+| **Gravity Fall** | 0.18s × distance | QUAD_IN | Smooth drop with overshoot |
+| **Bounce** | 0.1s | QUAD_OUT/IN | Subtle squash on landing |
+| **New Gem Spawn** | 0.18s × (row+1) | QUAD_IN + bounce | Fall from above with bounce |
+
+**Animation Timing Constants**:
+```gdscript
+const SWAP_ANIM_DURATION: float = 0.12
+const CLEAR_ANIM_DURATION: float = 0.15
+const FALL_ANIM_DURATION: float = 0.18
+const BOUNCE_ANIM_DURATION: float = 0.1
+```
+
+**Particle Effects** (Sprite2D-based due to GPUParticles2D API issues):
+| Effect | Implementation | Visual |
+|--------|----------------|--------|
+| **Gem Clear** | Expanding colored flash (Sprite2D) | Gem-colored burst expanding & fading |
+| **Echo Detonation** | Expanding golden shockwave ring | Yellow/gold ring expanding & fading |
+| **Special Gem Creation** | Pulse + color flash | Scale pulse + kind-specific color (Bolt=Yellow, Prism=Orange, Nova=Magenta) |
+
+**Cascade Sequencing** (automatic):
+1. `try_swap()` → swap animation (0.12s)
+2. Match signals emitted by `board_sim` → `_animate_clear()` per match
+3. Clear animations (scale→0 + fade) complete → `_animate_gravity_fall()`
+4. Gems fall with bounce → new gems spawn from top with bounce
+5. After all fall complete → refresh → check for cascades (handled by `board_sim`)
+
+**Input Guarding**:
+- `is_animating` flag blocks all input during animations
+- `is_processing_swap` blocks during swap processing
+- Both checked in `_unhandled_input()` and `_on_mouse_click()`
+
+**MCP Verification**:
+- Game runs without script errors ✅
+- Animations trigger correctly on matches ✅
+- Cascade sequences complete correctly ✅
+- Input properly locked during animations ✅
+- No script errors during runtime
+
+**Animation Timing Constants**:
+```gdscript
+const SWAP_ANIM_DURATION: float = 0.12
+const CLEAR_ANIM_DURATION: float = 0.15
+const FALL_ANIM_DURATION: float = 0.18
+const BOUNCE_ANIM_DURATION: float = 0.1
+```
+
+**Key Files Modified**:
+- `scripts/board.gd` — Full animation pipeline, cascade sequencing, particle effects, input guarding
+- `scenes/main.tscn` — Main scene
+
+**Next Stage**: Stage 5 — Native Audio
+- Set up audio buses, pitch-escalating match SFX per cascade step
+- Dynamic music intensity based on combo/resonance
+- Configuration toggles (mute all, mute music, mute SFX, low-fx)
