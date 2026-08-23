@@ -4,4 +4,4 @@
 
 [node name="Main" type="Node2D"]
 
-[node name="Board" type="Node2D" instance=ExtResource("1_0")]
+[node name="Board" parent="." instance=ExtResource("1_0")]

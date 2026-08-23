@@ -105,7 +105,49 @@ Combo: 3, Resonance: 1.00
 - `scripts/stage1_test_runner.gd` — GDScript test runner with signal handlers
 
 **Next Stage**: Stage 2 — Static Board Render
-- Build `board.tscn` and `gem.tscn` (`Sprite2D`)
-- Render initial grid from `BoardSim`
-- Verify glyph/shape distinction across all gem types
-- Capture MCP screenshot to verify
+
+---
+
+### Stage 2 — Static Board Render ✅ COMPLETE
+
+**Date**: 2026-08-23
+
+**Summary**:
+- Created procedural gem rendering with distinct shapes per gem type (accessibility requirement)
+- Built `gem.tscn` + `scripts/gem.gd`: Sprite2D with `set_gem(kind, has_echo)` method
+- Built `board.tscn` + `scripts/board.gd`: Instantiates gems from `BoardSim.get_cell()`
+- Created `main.tscn` as project main scene
+- Verified via MCP game screenshot (640×359)
+
+**Gem Visual Design** (per 03-GAME-DESIGN.md §Gem set & accessibility):
+| Kind | Shape | Color | Description |
+|------|-------|-------|-------------|
+| 0 | Circle | Cyan | Round with soft edge |
+| 1 | Triangle | Yellow | Equilateral pointing up |
+| 2 | Square | Green | Axis-aligned with outline |
+| 3 | Diamond | Magenta | 45° rotated square |
+- All shapes have 2px dark outline for contrast
+- Echo state: yellowish tint (modulate = 1.0, 1.0, 0.5)
+- Texture filtering: NEAREST for crisp pixel art
+
+**Board Layout**:
+- 8×8 grid, 64px cell size, 8px padding
+- Centered in viewport via offset calculation
+- `refresh_board()` syncs visual state with `BoardSim`
+
+**MCP Verification**:
+- Game viewport screenshot captured: 640×359 (original 929×522)
+- Grid centered and properly aligned
+- All 4 gem shapes/glyphs crisp, distinct, and legible
+- Background/board borders clear
+
+**Key Files Created**:
+- `scenes/gem.tscn` + `scripts/gem.gd` — Gem presentation
+- `scenes/board.tscn` + `scripts/board.gd` — Board presentation  
+- `scenes/main.tscn` — Main scene
+- `project.godot` — Updated run/main_scene
+
+**Next Stage**: Stage 3 — Input & Core Playable Loop
+- Implement mouse/keyboard selection & swap input
+- Wire `try_swap` to signal handlers for instant grid refresh
+- Capture MCP screenshot and test a full clear

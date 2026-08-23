@@ -46,7 +46,33 @@ This file tracks any deviations from the original specifications in `Docs/` that
 
 ### Stage 2: Static Board Render
 
-*Pending — to be filled during Stage 2*
+**Deviation 1**: Gem shapes drawn procedurally via `Image.set_pixel()` instead of using pre-made sprite textures
+
+**Reason**: The spec mentions "Sprite2D based (or CanvasItem with distinct procedural/vector shapes/glyphs)" — procedural drawing was chosen for zero external asset dependencies and crisp rendering at any cell size. This satisfies the accessibility requirement (shape + color distinction) without needing sprite sheets.
+
+**Files Affected**: `scripts/gem.gd` (`_draw_gem_shape`, `_draw_circle`, `_draw_triangle`, `_draw_square`, `_draw_diamond`)
+
+**Spec References**: 03-GAME-DESIGN.md §Gem set & accessibility; MIGRATION_STAGE0.md Stage 2 Requirements.
+
+---
+
+**Deviation 2**: Echo visual effect uses `modulate` color tint (yellowish) instead of a separate overlay/sprite
+
+**Reason**: Simple and performant; no additional draw calls or texture memory. The tint clearly distinguishes echo-charged gems without obscuring the base shape.
+
+**Files Affected**: `scripts/gem.gd` (set_gem method)
+
+**Spec References**: 04-RENDERING-AUDIO.md §Particle system (echo pulse visual).
+
+---
+
+**Deviation 3**: Board centering logic in `scripts/board.gd` uses manual offset calculation rather than Godot's layout containers
+
+**Reason**: `Node2D` with manual positioning gives pixel-perfect control for the grid. Containers like `GridContainer` would require `Control` nodes and add complexity for a fixed-size game board that needs to center in a `Viewport`.
+
+**Files Affected**: `scripts/board.gd` (`_initialize_board`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 2 — "Center the board nicely in the viewport with configurable cell size and padding."
 
 ---
 
