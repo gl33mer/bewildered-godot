@@ -42,7 +42,11 @@ const BOUNCE_ANIM_DURATION: float = 0.1
 const ROTATE_ANIM_DURATION: float = 0.25
 const CASCADE_STEP_PAUSE: float = 0.1
 
-# Debug HUD nodes
+# Debug HUD nodes.
+# The panel lives on a CanvasLayer added to the scene ROOT — never under this
+# rotating Board node — so UI stays perfectly static while the Tumbler spins
+# (QA Issue A).
+var debug_layer: CanvasLayer
 var debug_panel: Panel
 var debug_vbox: VBoxContainer
 var hover_label: Label
@@ -219,7 +223,6 @@ func _create_highlights() -> void:
 	add_child(hover_highlight)
 	
 	_update_cursor_highlight()
-	_create_debug_hud()
 
 func _initialize_board() -> void:
 	# Create gems first, then connect signals, then initialize board
@@ -240,20 +243,32 @@ func _initialize_board() -> void:
 	_update_cursor_highlight()
 
 func _create_debug_hud() -> void:
+	if debug_panel != null:
+		return  # Already built (guard: _ready + _create_highlights both call this)
+	# QA Issue A fix: parent the debug HUD to a root-level CanvasLayer so it is
+	# completely independent of the rotating Board Node2D.
+	debug_layer = CanvasLayer.new()
+	debug_layer.name = "DebugHUDLayer"
+	debug_layer.layer = 20
+	get_tree().root.add_child.call_deferred(debug_layer)
 	# Create debug HUD panel (Control) at top-right of viewport
 	debug_panel = Panel.new()
 	debug_panel.layout_mode = 3
-	debug_panel.anchors_preset = 9  # Top-right
+	# Pin to the top-right of the viewport: both left/right anchors at 1.0 so
+	# offset_left/-right measure inward from the right edge.
+	debug_panel.anchor_left = 1.0
 	debug_panel.anchor_right = 1.0
 	debug_panel.anchor_top = 0.0
+	debug_panel.anchor_bottom = 0.0
+	debug_panel.offset_left = -340
 	debug_panel.offset_right = -20
-	debug_panel.offset_top = 20
-	debug_panel.offset_left = -320
-	debug_panel.offset_bottom = -400
+	debug_panel.offset_top = 70
+	debug_panel.offset_bottom = 420
 	debug_panel.add_theme_constant_override("panel_border_width", 2)
 	debug_panel.add_theme_color_override("panel_bg", Color(0.05, 0.05, 0.08, 0.85))
 	debug_panel.add_theme_color_override("border_color", Color(0.3, 0.3, 0.4, 1.0))
-	add_child(debug_panel)
+	# Attach to the static root CanvasLayer, NOT to this rotating Board node.
+	debug_layer.add_child(debug_panel)
 	
 	# VBoxContainer for labels
 	debug_vbox = VBoxContainer.new()
@@ -838,6 +853,14 @@ func _sync_board_state() -> void:
 	is_animating = false
 	is_processing_swap = false
 
+func _exit_tree() -> void:
+	# Free the root-level debug layer with the board so it can't leak across
+	# scene reloads.
+	if debug_layer != null && is_instance_valid(debug_layer):
+		debug_layer.queue_free()
+	debug_layer = null
+	debug_panel = null
+
 # Signal handlers for match resolution and effects
 func _on_match_resolved(cleared_cells: Array[Vector2i], gem_kind: int, cascade_depth: int) -> void:
 	last_match_count += cleared_cells.size()
@@ -1268,28 +1291,39 @@ func _attempt_rotate(clockwise: bool) -> void:
 	_pending_cascade_clears.clear()
 	_rotate_tumbler(clockwise)
 
-# The standard Match-3 "spin & reset" tumbler: the board visually spins 90°,
-# the grid transposes in Rust (gravity always Down), then the node rotation is
-# reset to 0° so mouse coordinates (get_local_mouse_position) and the viewport
-# bounds stay 100% stable.
+# The standard Match-3 "spin & reset" tumbler — made SEAMLESS (QA Issue B):
+#
+# The sim's transpose mapping is:  CW  old(x,y) -> new(y, old_h-1-x)
+#                                  CCW old(x,y) -> new(x, old_w-1-y)
+# A visual container rotation of −90° displays contents exactly as a CW
+# transpose, and +90° exactly as a CCW transpose. So:
+#   1) Tween the board to the matching angle (−90° for CW, +90° for CCW).
+#   2) While STILL rotated, re-seat every gem node into its new transposed
+#      grid cell — on screen each gem does not move a single pixel.
+#   3) Reset rotation_degrees = 0 — also pixel-invisible now, because the
+#      local positions already encode the rotated frame. No snap, ever.
+#   4) Present the gravity-down cascades as usual.
 func _rotate_tumbler(clockwise: bool) -> void:
 	is_animating = true
 	is_processing_swap = false
 
-	# 1) Animate the visual spin of the whole board container (±90°).
-	var target_angle := 90.0 if clockwise else -90.0
+	# 1) Animate the visual spin of the whole board container to the angle that
+	# MATCHES the sim's transpose direction (−90° shows a CW-transposed grid).
+	var target_angle := -90.0 if clockwise else 90.0
 	var spin := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	spin.tween_property(self, "rotation_degrees", target_angle, ROTATE_ANIM_DURATION)
+	audio_manager.play_swap()
 	await spin.finished
 
-	# 2) Reset visual orientation to 0° immediately — the transposed grid in the
-	# sim is redrawn in the un-rotated frame, so clicks map exactly.
-	rotation_degrees = 0.0
+	# Capture the pre-rotation dimensions for the index remap below.
+	var old_w := board_width
+	var old_h := board_height
 
-	# 3) Authoritative grid transpose in Rust (gravity always down); produces the
-	# per-depth cascade clears that _process_match_sequence will present.
+	# 2) Authoritative grid transpose in Rust (gravity always down); produces
+	# the per-depth cascade clears that _process_match_sequence will present.
 	var result = board_sim.rotate_board(clockwise)
 	if not result:
+		rotation_degrees = 0.0
 		is_animating = false
 		is_processing_swap = false
 		return
@@ -1297,15 +1331,50 @@ func _rotate_tumbler(clockwise: bool) -> void:
 	total_moves += 1
 	selected_cell = Vector2i(-1, -1)
 	_update_selection_highlight()
-	audio_manager.play_swap()
 
 	# Sync sim dimensions if a non-square grid swapped W x H <-> H x W so
 	# _get_cell_position stays perfectly centered below the HUD.
 	_apply_sim_dimensions()
 
-	# 4) Present the gravity-down cascades (per-depth clears => slide => spawn =>
-	# refresh + unlock).
+	# 3) SEAMLESS RE-SEAT: while the container is still at ±90°, move every gem
+	# node into its new transposed cell. Because the spin angle matches the
+	# data mapping, each surviving gem's screen position is unchanged by this.
+	_reseat_gems_into_transposed_cells(clockwise, old_w, old_h)
+
+	# Resetting to 0° is now visually invisible — local positions already
+	# carry the rotated frame. Mouse coords / viewport bounds are stable again.
+	rotation_degrees = 0.0
+
+	# 4) Present the gravity-down cascades (per-depth clears => slide => spawn
+	# => refresh + unlock).
 	_process_match_sequence()
+
+func _reseat_gems_into_transposed_cells(clockwise: bool, old_w: int, old_h: int) -> void:
+	# Remap every existing gem node from its OLD grid index to its NEW one and
+	# set position directly (no tween): at the matched spin angle the new cell
+	# renders at exactly the same screen point the gem already occupies.
+	var new_instances: Array[Node2D] = []
+	new_instances.resize(board_width * board_height)
+	for oy in range(old_h):
+		for ox in range(old_w):
+			var idx := oy * old_w + ox
+			if idx >= gem_instances.size():
+				continue
+			var gem = gem_instances[idx]
+			if gem == null || !is_instance_valid(gem):
+				continue
+			# Same mapping as bewildered-core::Board::rotate_board.
+			var nx: int
+			var ny: int
+			if clockwise:
+				nx = oy
+				ny = old_h - 1 - ox
+			else:
+				nx = ox
+				ny = old_w - 1 - oy
+			gem.position = _get_cell_position(nx, ny)
+			new_instances[ny * board_width + nx] = gem
+	gem_instances = new_instances
 
 # Keep board_width/board_height + the gem instance array in sync with the sim so
 # a transposed (W x H <-> H x W) board stays centered.

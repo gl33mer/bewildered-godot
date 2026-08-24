@@ -518,3 +518,41 @@ almost always had pre-existing matches, and `try_swap` accepted Success whenever
 to create a match involving a swapped cell (or a special). Added tests `new_board_is_match_free` and
 `unrelated_swap_is_rejected`. The HUD-overlap item was already fixed (board sits 24px below the bar)
 and was re-verified rather than re-applied.
+
+### Human QA Pass — Issue A (UI on rotating board) & Issue B (rotation snap) FIXED
+
+**Date**: 2026-08-24
+**Baseline**: commit 2cae69e
+
+**Issue A — Debug HUD attached to the rotating Board** (`scripts/board.gd`):
+- `_create_debug_hud()` parented the debug `Panel` directly onto the Board Node2D, so it rode on
+  top of gems and spun with E/Q. It was ALSO built twice (once in `_ready`, once at the end of
+  `_create_highlights`), leaking an orphaned duplicate panel on the board.
+- Fix: the debug HUD now lives on a dedicated root-level `CanvasLayer` ("DebugHUDLayer", layer 20)
+  added via `get_tree().root.add_child.call_deferred(...)`; the Board node contains ONLY gem
+  instances + selection/cursor/hover highlight sprites. Added `_exit_tree()` cleanup so the layer
+  can't leak across scene reloads, plus a double-build guard. Also fixed the panel's broken anchor
+  rect (only `anchor_right` was set, so `offset_left=-320` pushed the left edge offscreen) and
+  moved the panel to `offset_top=70` so it sits below the level HUD bar.
+- Deleted unused leftover `scenes/debug_hud.tscn`.
+
+**Issue B — Jarring snap at the end of the Tumbler spin** (`scripts/board.gd`):
+- Root cause found: the spin direction was INVERTED relative to the sim's transpose. Rust
+  `rotate_board(true)` maps old(x,y) → new(y, old_h−1−x), which is what a −90° VISUAL rotation
+  displays; the old code spun to +90°, so resetting to 0° forced an unavoidable one-frame pop.
+- Fix (`_rotate_tumbler` + new `_reseat_gems_into_transposed_cells`):
+  1) Tween the container to the MATCHING angle (−90° for CW, +90° for CCW);
+  2) call `board_sim.rotate_board()` and `_apply_sim_dimensions()`;
+  3) while STILL rotated, re-seat every gem node directly (no tween) into its new transposed cell
+     using the exact Rust mapping — each gem's screen position is unchanged by this step;
+  4) reset `rotation_degrees = 0.0`, now pixel-invisible because local positions already encode
+     the rotated frame. Mouse coords/viewport bounds stay stable; cascades then present as before.
+  Swap sound moved to spin start (was after the await).
+
+**Verification** (MCP, live game):
+- Mid-spin slow-motion screenshot: board smoothly rotated ~45°, top HUD bar + debug panel
+  perfectly static (UI never rotates).
+- Settled after CW + CW: rotation=0, moves decremented, 64/64 gems, input unlocked, no errors.
+- Post-rotation `find_valid_swap()` + `_attempt_swap` resolved a 2-cascade chain (score 81,
+  objective 81/5000) proving click mapping is intact after transposes; CCW spin also clean.
+- COORD SELF-TEST 9/9 PASSED; `cargo test --workspace` 16/16 PASS (Rust untouched).

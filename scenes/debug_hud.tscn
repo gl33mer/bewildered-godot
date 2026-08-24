@@ -1,0 +1,94 @@
+[gd_scene format=3 uid="uid://l51u7wuolq8d"]
+
+[node name="DebugHUD" type="Control" unique_id=105873335]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="DebugHUD#Panel" type="Panel" parent="." unique_id=1134501637]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel#VBoxContainer" type="VBoxContainer" parent="." unique_id=302784338]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 4
+
+[node name="VBoxContainer#Title" type="Label" parent="." unique_id=2129951163]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 0
+theme_override_font_sizes/font_size = 16
+text = "DEBUG HUD"
+horizontal_alignment = 1
+
+[node name="VBoxContainer#Separator" type="HSeparator" parent="." unique_id=2067111581]
+layout_mode = 0
+
+[node name="VBoxContainer#HoverLabel" type="Label" parent="." unique_id=2122750548]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Hover: None"
+
+[node name="VBoxContainer#SelectedLabel" type="Label" parent="." unique_id=876271856]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Selected: None"
+
+[node name="VBoxContainer#CursorLabel" type="Label" parent="." unique_id=2132486425]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Cursor: (0, 0)"
+
+[node name="VBoxContainer#ActionLog" type="Label" parent="." unique_id=685564582]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Action: Waiting for input..."
+
+[node name="VBoxContainer#MovesLabel" type="Label" parent="." unique_id=185131238]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Moves: 0"
+
+[node name="VBoxContainer#ScoreLabel" type="Label" parent="." unique_id=1232697627]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Score: 0"
+
+[node name="VBoxContainer#ComboLabel" type="Label" parent="." unique_id=1379758210]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Combo: 0"
+
+[node name="VBoxContainer#CascadeLabel" type="Label" parent="." unique_id=247744024]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Last Cascade: -"
+
+[node name="VBoxContainer#MultiplierLabel" type="Label" parent="." unique_id=1124594800]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Multiplier: 1.00x"
+
+[node name="VBoxContainer#CoordTestLabel" type="Label" parent="." unique_id=1212263217]
+layout_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "Coord Test: Not run"
