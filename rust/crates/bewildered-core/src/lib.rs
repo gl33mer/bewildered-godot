@@ -730,23 +730,41 @@ impl Board {
         self.refill();
     }
 
-    /// Rotate gravity 90° (clockwise or counter-clockwise) and resolve the
-    /// resulting tumbling cascades as a move. Always succeeds and costs a move.
-    pub fn rotate_gravity(&mut self, clockwise: bool) -> MoveOutcome {
-        self.gravity = if clockwise {
-            self.gravity.rotate_cw()
-        } else {
-            self.gravity.rotate_ccw()
-        };
+    /// Rotate the grid matrix 90° (clockwise or counter-clockwise) and resolve
+    /// the resulting falling cascades as a move. Always succeeds and costs a
+    /// move. Gravity is ALWAYS Down in the rotated orientation: the grid data
+    /// truly transposes (width/height swap) and gems fall toward the new bottom
+    /// row, cascade, and refill from the top.
+    ///
+    /// Clockwise 90°:  new[r][c] = old[height-1-c][r]
+    /// Counter-clockwise: new[r][c] = old[c][width-1-r]
+    pub fn rotate_board(&mut self, clockwise: bool) -> MoveOutcome {
+        let old_w = self.width;
+        let old_h = self.height;
+        let mut new_gems = vec![None; old_w * old_h];
+        for nr in 0..old_w {
+            for nc in 0..old_h {
+                // nr in 0..new_height(=old_w), nc in 0..new_width(=old_h)
+                let (or, oc) = if clockwise {
+                    (old_h - 1 - nc, nr)
+                } else {
+                    (nc, old_w - 1 - nr)
+                };
+                new_gems[nr * old_h + nc] = self.gems[or * old_w + oc].clone();
+            }
+        }
+
+        self.gems = new_gems;
+        self.height = old_w;
+        self.width = old_h;
+        self.gravity = Direction::Down;
 
         self.combo = 0;
         self.resonance_multiplier = 1.0;
         self.resonance_stack = 0;
         self.cleared_this_move.clear();
 
-        // Tumble: pull every gem toward the new wall, refill the emptied side.
-        self.resolve_gravity(self.gravity);
-
+        // Gems fall toward the new bottom row, cascade, and refill from the top.
         let initial_matches = self.find_all_matches();
         let (total_cascades, clears_by_depth) = self.process_matches(initial_matches.clone());
 
@@ -1165,31 +1183,74 @@ mod tests {
         assert_eq!(Direction::Left.rotate_ccw(), Direction::Down);
     }
 
+    /// rotate_board transposes the physical grid, swaps width/height, and keeps
+    /// gravity pointing Down. Uses a non-square board to prove transposition.
     #[test]
-    fn rotate_gravity_succeeds_and_changes_direction() {
-        let mut board = Board::new(8, 8, 12345, vec![
+    fn rotate_board_cw_transposes_grid() {
+        let kinds = [
             GemKind::Circle,
             GemKind::Triangle,
             GemKind::Square,
             GemKind::Diamond,
-        ]);
-        assert_eq!(board.gravity, Direction::Down);
+        ];
+        // width=2, height=3 (3 rows, 2 cols). Encode cell kind by row-major index.
+        let mut board = Board::new(2, 3, 7, kinds.to_vec());
+        for r in 0..3 {
+            for c in 0..2 {
+                board.set_gem(r, c, kinds[(r * 2 + c) % 4]);
+            }
+        }
+
         assert!(matches!(
-            board.rotate_gravity(true),
+            board.rotate_board(true),
             MoveOutcome::Success { .. }
         ));
-        assert_eq!(board.gravity, Direction::Left);
+        // Width/height swap: width=3, height=2.
+        assert_eq!(board.width, 3);
+        assert_eq!(board.height, 2);
+        assert_eq!(board.gravity, Direction::Down);
+
+        // CW: new[r][c] = old[old_h-1-c][r], old_h = 3.
+        // new(0,0) = old(3-1-0, 0) = old(2,0) -> idx 2*2+0=4 -> 4%4=0 Circle
+        // new(1,0) = old(2,1) -> idx 5 -> 5%4=1 Triangle
+        assert_eq!(board.gem(0, 0).map(|g| g.kind), Some(GemKind::Circle));
+        assert_eq!(board.gem(1, 0).map(|g| g.kind), Some(GemKind::Triangle));
+        // new(0,2) = old(3-1-2,0)=old(0,0) -> idx 0 -> Circle
+        assert_eq!(board.gem(0, 2).map(|g| g.kind), Some(GemKind::Circle));
+    }
+
+    /// Counter-clockwise transpose: new[r][c] = old[c][width-1-r].
+    #[test]
+    fn rotate_board_ccw_transposes_grid() {
+        let kinds = [
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+        ];
+        let mut board = Board::new(3, 2, 9, kinds.to_vec()); // width=3, height=2
+        for r in 0..2 {
+            for c in 0..3 {
+                board.set_gem(r, c, kinds[(r * 3 + c) % 4]);
+            }
+        }
         assert!(matches!(
-            board.rotate_gravity(false),
+            board.rotate_board(false),
             MoveOutcome::Success { .. }
         ));
+        // width=old_height=2, height=old_width=3
+        assert_eq!(board.width, 2);
+        assert_eq!(board.height, 3);
         assert_eq!(board.gravity, Direction::Down);
+        // CCW: new[r][c] = old[c][width-1-r]; old width=3.
+        // new(0,0) = old(0, 3-1-0)=old(0,2) -> idx 0*3+2=2 -> 2%4=2 Square
+        assert_eq!(board.gem(0, 0).map(|g| g.kind), Some(GemKind::Square));
     }
 
     #[test]
-    fn rotate_gravity_keeps_board_full() {
-        // Four clockwise rotations return gravity to Down; each opponent rotation
-        // is a valid move (Success) and refills the board so no cell is empty.
+    fn rotate_board_keeps_board_full_and_gravity_down() {
+        // Rotating an 8x8 and running cascades must leave a full board with
+        // gravity still pointing Down (always in rotate_board).
         let mut board = Board::new(8, 8, 42, vec![
             GemKind::Circle,
             GemKind::Triangle,
@@ -1198,13 +1259,15 @@ mod tests {
         ]);
         for _ in 0..4 {
             assert!(matches!(
-                board.rotate_gravity(true),
+                board.rotate_board(true),
                 MoveOutcome::Success { .. }
             ));
+            assert_eq!(board.gravity, Direction::Down);
+            assert_eq!(board.width, 8);
+            assert_eq!(board.height, 8);
             for (i, g) in board.gems.iter().enumerate() {
                 assert!(g.is_some(), "board not full after rotation at idx {}", i);
             }
         }
-        assert_eq!(board.gravity, Direction::Down);
     }
 }

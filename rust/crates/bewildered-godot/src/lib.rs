@@ -194,14 +194,14 @@ impl BoardSim {
         }
     }
 
-    /// Rotate gravity 90° (clockwise or counter-clockwise). Always succeeds and
-    /// costs a move; the tumbler resolves gravity + cascades in the new
-    /// direction and reports every cascade depth for paced presentation.
+    /// Rotate the board grid 90° (clockwise or counter-clockwise): the grid data
+    /// truly transposes (width/height swap) with gravity always Down, gems fall
+    /// to the new bottom row + cascade. Always succeeds and costs a move.
     #[func]
-    fn rotate_gravity(&mut self, clockwise: bool) -> bool {
+    fn rotate_board(&mut self, clockwise: bool) -> bool {
         let outcome = {
             let board = self.board.as_mut().unwrap();
-            board.rotate_gravity(clockwise)
+            board.rotate_board(clockwise)
         };
 
         match &outcome {

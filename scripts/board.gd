@@ -32,10 +32,6 @@ var animating_gems: Array[Node2D] = []
 # them here and run a single controlled clear/fall/spawn sequence afterwards.
 var _pending_cascade_clears: Array = []
 
-# Accumulated board rotation (radians) — the visual Gravity Tumbler leans the
-# whole board 90° per rotation action while the sim's gravity direction changes.
-var board_rotation: float = 0.0
-
 # Animation timing constants
 const SWAP_ANIM_DURATION: float = 0.12
 const CLEAR_ANIM_DURATION: float = 0.15
@@ -44,7 +40,6 @@ const BOUNCE_ANIM_DURATION: float = 0.1
 
 # Gravity Tumbler + cascade pacing constants
 const ROTATE_ANIM_DURATION: float = 0.25
-const ROTATION_QUARTER: float = PI / 2.0
 const CASCADE_STEP_PAUSE: float = 0.1
 
 # Debug HUD nodes
@@ -1211,37 +1206,60 @@ func _attempt_rotate(clockwise: bool) -> void:
 		return
 	is_processing_swap = true
 
-	# board_sim synchronously resolves the tumbling cascade and buffers each
+	# board_sim's rotate_board transposes the grid in Rust and buffers each
 	# cascade depth's clears into _pending_cascade_clears (same contract as a
 	# swap).
 	_pending_cascade_clears.clear()
-	var result = board_sim.rotate_gravity(clockwise)
+	_rotate_tumbler(clockwise)
+
+# The standard Match-3 "spin & reset" tumbler: the board visually spins 90°,
+# the grid transposes in Rust (gravity always Down), then the node rotation is
+# reset to 0° so mouse coordinates (get_local_mouse_position) and the viewport
+# bounds stay 100% stable.
+func _rotate_tumbler(clockwise: bool) -> void:
+	is_animating = true
+	is_processing_swap = false
+
+	# 1) Animate the visual spin of the whole board container (±90°).
+	var target_angle := 90.0 if clockwise else -90.0
+	var spin := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	spin.tween_property(self, "rotation_degrees", target_angle, ROTATE_ANIM_DURATION)
+	await spin.finished
+
+	# 2) Reset visual orientation to 0° immediately — the transposed grid in the
+	# sim is redrawn in the un-rotated frame, so clicks map exactly.
+	rotation_degrees = 0.0
+
+	# 3) Authoritative grid transpose in Rust (gravity always down); produces the
+	# per-depth cascade clears that _process_match_sequence will present.
+	var result = board_sim.rotate_board(clockwise)
 	if not result:
-		is_processing_swap = false
 		is_animating = false
+		is_processing_swap = false
 		return
 
 	total_moves += 1
 	selected_cell = Vector2i(-1, -1)
 	_update_selection_highlight()
 	audio_manager.play_swap()
-	_rotate_board_container(clockwise)
 
-func _rotate_board_container(clockwise: bool) -> void:
-	is_animating = true
-	is_processing_swap = false
-	board_rotation += ROTATION_QUARTER if clockwise else -ROTATION_QUARTER
+	# Sync sim dimensions if a non-square grid swapped W x H <-> H x W so
+	# _get_cell_position stays perfectly centered below the HUD.
+	_apply_sim_dimensions()
 
-	# Lean the whole board 90°. The sim has already resolved gravity in the new
-	# direction; the tween is presentational and the cascade/refresh after it
-	# settles the gems into their new wall.
-	var tween := create_tween()
-	tween.tween_property(
-		self, "rotation", board_rotation, ROTATE_ANIM_DURATION
-	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
-	await tween.finished
-
+	# 4) Present the gravity-down cascades (per-depth clears => slide => spawn =>
+	# refresh + unlock).
 	_process_match_sequence()
+
+# Keep board_width/board_height + the gem instance array in sync with the sim so
+# a transposed (W x H <-> H x W) board stays centered.
+func _apply_sim_dimensions() -> void:
+	var sw := int(board_sim.get_width())
+	var sh := int(board_sim.get_height())
+	if sw != board_width or sh != board_height:
+		board_width = sw
+		board_height = sh
+		gem_instances.resize(sw * sh)
 
 # --- Special-gem elimination FX (fired before a computer of that kind clears) ---
 

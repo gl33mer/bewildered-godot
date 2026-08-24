@@ -427,3 +427,25 @@ per-direction visual replay), so an intermediate fall during a rotation-triggere
 cascade is approximate — the final board always snaps to the correct wall. This is
 the same tradeoff already documented for the Stage-6 cascade rewrite and keeps the
 presentation decoupled (Rust owns rules, Godot owns looks).
+
+### Stage 6.5 QA: Tumbler "Spin & Reset" Architecture (transpose grid, keep mouse coords stable)
+
+**Deviation / correction**: The initial Gravity Tumbler implementation visually Leaned the `Board`
+Node2D 90° and kept a non-Down gravity vector in Rust. A live playtest showed this broke mouse click
+mapping (`get_local_mouse_position()` was rotated while the Rust grid stayed static) and could push gems
+off-screen on non-square viewports. Replaced with the standard Match-3 **spin & reset** pattern:
+
+- **Rust**: `rotate_board(clockwise)` replaces `rotate_gravity`. It physically transposes the grid
+  matrix (±90°), swaps width/height, forces gravity to ALWAYS Down, then runs `process_matches()` so
+  gems fall to the new bottom row, cascade, and refill from the top. Always Success + 1 move.
+  Added transpose-correctness tests (`rotate_board_cw_transposes_grid`, `rotate_board_ccw_transposes_grid`,
+  `rotate_board_keeps_board_full_and_gravity_down`).
+- **FFI**: `BoardSim.rotate_board(bool) -> bool` (renamed from rotate_gravity).
+- **Godot**: `_rotate_tumbler()` spins the board container to ±90° (TRANS_QUAD, 0.25s), calls
+  `rotate_board`, then resets `rotation_degrees = 0` and re-syncs — so `get_local_mouse_position()`
+  and viewport bounds are completely stable; the downward cascade animation now exactly matches the
+  sim's always-Down gravity. `_apply_sim_dimensions()` keeps `board_width/height` + `gem_instances`
+  in sync if a non-square grid swaps W x H <-> H x W, so `_get_cell_position` stays centered.
+
+**Kept from prior stage**: per-cascade-depth clears (`clears_by_depth`), step-by-step pacing, and the
+special-elimination FX all remain.
