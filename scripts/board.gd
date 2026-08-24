@@ -27,6 +27,11 @@ var is_processing_swap: bool = false
 var is_animating: bool = false
 var animating_gems: Array[Node2D] = []
 
+# Buffers for the synchronous cascade signal burst emitted by board_sim
+# during try_swap (all cascade depths arrive in the same frame). We accumulate
+# them here and run a single controlled clear/fall/spawn sequence afterwards.
+var _pending_cascade_clears: Array = []
+
 # Animation timing constants
 const SWAP_ANIM_DURATION: float = 0.12
 const CLEAR_ANIM_DURATION: float = 0.15
@@ -375,6 +380,10 @@ func _attempt_swap(a: Vector2i, b: Vector2i) -> void:
 		return
 	is_processing_swap = true
 	
+	# Reset the cascade-signal buffer before board_sim synchronously bursts
+	# match_resolved signals for every cascade depth of this move.
+	_pending_cascade_clears.clear()
+	
 	# Store swap details for debug log
 	last_swap_details = {"a": a, "b": b}
 	last_match_count = 0
@@ -404,15 +413,16 @@ func _animate_swap(a: Vector2i, b: Vector2i) -> void:
 	var gem_a = _get_gem_instance(a.x, a.y)
 	var gem_b = _get_gem_instance(b.x, b.y)
 	if gem_a == null || gem_b == null:
-		# Fallback to instant refresh
-		call_deferred("_sync_board_state")
+		# Fallback: no live gems to animate — go straight to the cascade phase.
+		call_deferred("_process_match_sequence")
 		return
 	
 	var pos_a = _get_cell_position(a.x, a.y)
 	var pos_b = _get_cell_position(b.x, b.y)
 	
-	# Store original positions for potential snap-back
-	animating_gems = [gem_a, gem_b]
+	# NOTE: the swap gems are intentionally NOT added to animating_gems — that
+	# array is reserved for tracking the clear animation so the cascade chain
+	# advances exactly once after every matched gem has been cleared.
 	
 	# Animate gem A to B's position
 	var tween_a = create_tween()
@@ -424,11 +434,8 @@ func _animate_swap(a: Vector2i, b: Vector2i) -> void:
 	tween_b.set_parallel(true)
 	tween_b.tween_property(gem_b, "position", pos_a, SWAP_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	
-	# Wait for swap animation to complete, then process matches
+	# Wait for swap animation to complete, then run the cascade sequence.
 	await tween_a.finished
-	
-	# After swap animation, process the match signals that were already emitted
-	# The board_sim already updated, now we need to animate the clear
 	_process_match_sequence()
 
 func _animate_rejection_snapback(a: Vector2i, b: Vector2i) -> void:
@@ -474,11 +481,33 @@ func _animate_rejection_snapback(a: Vector2i, b: Vector2i) -> void:
 	_sync_board_state()
 
 func _process_match_sequence() -> void:
-	# This will be called after swap animation completes
-	# The match signals from board_sim have already been emitted
-	# We need to animate the clear and fall
-	# The signals (_on_match_resolved, etc.) will handle the animation
-	pass
+	# board_sim fired every cascade signal synchronously during try_swap, so the
+	# sim already holds the final post-cascade board. We buffered the per-cascade
+	# clears in _pending_cascade_clears; now run ONE composite clear over every
+	# cell cleared across all cascades, then let the existing fall/spawn/refresh
+	# chain settle the board to the authoritative 64-gem state and unlock input.
+	animating_gems.clear()
+	var all_cells: Array[Vector2i] = []
+	var representative_kind: int = 0
+	for entry in _pending_cascade_clears:
+		representative_kind = entry["kind"]
+		for cell in entry["cells"]:
+			if not all_cells.has(cell):
+				all_cells.append(cell)
+	
+	if all_cells.is_empty():
+		# No matched cells (unexpected on a successful swap) — settle directly.
+		_settle_board()
+		return
+	
+	_animate_clear(all_cells, representative_kind)
+
+func _settle_board() -> void:
+	refresh_board()
+	_update_cursor_highlight()
+	_update_hover_highlight()
+	is_animating = false
+	is_processing_swap = false
 
 func _get_gem_instance(x: int, y: int) -> Node2D:
 	var idx = y * board_width + x
@@ -768,6 +797,7 @@ func _check_for_new_matches() -> void:
 	_update_cursor_highlight()
 	_update_hover_highlight()
 	is_animating = false
+	is_processing_swap = false
 
 func _sync_board_state() -> void:
 	# Sync visual board state with board_sim after animations
@@ -786,8 +816,14 @@ func _on_match_resolved(cleared_cells: Array[Vector2i], gem_kind: int, cascade_d
 	# Play match sound with pitch escalation based on cascade depth
 	audio_manager.play_match(cascade_depth)
 	
-	# Animate the cleared cells
-	_animate_clear(cleared_cells, gem_kind)
+	# board_sim emits every cascade depth synchronously in one frame (during
+	# try_swap). We must NOT animate clears here — buffer them so the pipeline
+	# runs a single controlled clear sequence after the swap animation finishes.
+	_pending_cascade_clears.append({
+		"cells": cleared_cells.duplicate(),
+		"kind": gem_kind,
+		"depth": cascade_depth,
+	})
 
 func _on_special_gem_created(pos: Vector2i, kind: int) -> void:
 	var kind_names = {0: "Bolt", 1: "Prism", 2: "Nova"}
@@ -1054,6 +1090,63 @@ func get_coord_test_results() -> Array[Dictionary]:
 
 func get_board_sim() -> RefCounted:
 	return board_sim
+
+# --- QA / debug helpers ---
+# Find a legal swap that creates a match (for automated play-testing / QA).
+func find_valid_swap() -> Array:
+	var sw: int = board_sim.get_width()
+	var sh: int = board_sim.get_height()
+	var kinds: Dictionary = {}
+	for y in sw:
+		for x in sw:
+			var c = board_sim.get_cell(x, y)
+			kinds[Vector2i(x, y)] = int(c.kind) if not bool(c.empty) else -1
+	for y in sw:
+		for x in sw:
+			if int(kinds[Vector2i(x, y)]) < 0:
+				continue
+			if x + 1 < sw and _swap_creates_match(kinds, sw, sh, x, y, x + 1, y):
+				return [Vector2i(x, y), Vector2i(x + 1, y)]
+			if y + 1 < sh and _swap_creates_match(kinds, sw, sh, x, y, x, y + 1):
+				return [Vector2i(x, y), Vector2i(x, y + 1)]
+	return []
+
+func _swap_creates_match(kinds: Dictionary, w: int, h: int, ax: int, ay: int, bx: int, by: int) -> bool:
+	var a := Vector2i(ax, ay)
+	var b := Vector2i(bx, by)
+	var ka := int(kinds[a])
+	var kb := int(kinds[b])
+	if ka < 0 or kb < 0:
+		return false
+	kinds[a] = kb
+	kinds[b] = ka
+	var matches := _run_len(kinds, w, h, ax, ay, kb) >= 3 or _run_len(kinds, w, h, bx, by, ka) >= 3
+	kinds[a] = ka
+	kinds[b] = kb
+	return matches
+
+func _run_len(kinds: Dictionary, w: int, h: int, x: int, y: int, k: int) -> int:
+	var horiz := 1
+	var cx := x - 1
+	while cx >= 0 and int(kinds.get(Vector2i(cx, y), -1)) == k:
+		horiz += 1
+		cx -= 1
+	cx = x + 1
+	while cx < w and int(kinds.get(Vector2i(cx, y), -1)) == k:
+		horiz += 1
+		cx += 1
+	if horiz >= 3:
+		return horiz
+	var vert := 1
+	var cy := y - 1
+	while cy >= 0 and int(kinds.get(Vector2i(x, cy), -1)) == k:
+		vert += 1
+		cy -= 1
+	cy = y + 1
+	while cy < h and int(kinds.get(Vector2i(x, cy), -1)) == k:
+		vert += 1
+		cy += 1
+	return vert
 
 func _spawn_clear_particles(gem: Node2D, gem_kind: int) -> void:
 	# Create a small particle burst for gem clearing
