@@ -1,0 +1,33 @@
+[gd_resource type="AudioBusLayout" format=3]
+
+[resource]
+buses = [
+{
+"name": "Master",
+"volume_db": 0.0,
+"mute": false,
+"solo": false,
+"bypass_effects": false,
+"effects": []
+},
+{
+"name": "Music",
+"volume_db": 0.0,
+"mute": false,
+"solo": false,
+"bypass_effects": false,
+"effects": [],
+"send": "",
+"send_name": ""
+},
+{
+"name": "SFX",
+"volume_db": 0.0,
+"mute": false,
+"solo": false,
+"bypass_effects": false,
+"effects": [],
+"send": "",
+"send_name": ""
+}
+]

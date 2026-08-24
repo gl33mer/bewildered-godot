@@ -10,6 +10,7 @@ class_name GameBoard
 
 @onready var board_sim: RefCounted = BoardSim.new()
 @onready var gem_scene: PackedScene = preload("res://scenes/gem.tscn")
+@onready var audio_manager: AudioManager = AudioManager
 
 var gem_instances: Array[Node2D] = []
 
@@ -360,12 +361,14 @@ func _attempt_swap(a: Vector2i, b: Vector2i) -> void:
 	
 	if result:
 		total_moves += 1
+		audio_manager.play_swap()
 		# Successful swap - animate the swap
 		selected_cell = Vector2i(-1, -1)
 		_update_selection_highlight()
 		_animate_swap(a, b)
 	else:
 		# Failed swap - animate rejection snap-back
+		audio_manager.play_reject()
 		selected_cell = Vector2i(-1, -1)
 		_update_selection_highlight()
 		_animate_rejection_snapback(a, b)
@@ -731,12 +734,18 @@ func _on_match_resolved(cleared_cells: Array[Vector2i], gem_kind: int, cascade_d
 	last_cascade_depth = max(last_cascade_depth, cascade_depth)
 	print("Match resolved: %d cells, kind %d, cascade %d" % [cleared_cells.size(), gem_kind, cascade_depth])
 	
+	# Play match sound with pitch escalation based on cascade depth
+	audio_manager.play_match(cascade_depth)
+	
 	# Animate the cleared cells
 	_animate_clear(cleared_cells, gem_kind)
 
 func _on_special_gem_created(pos: Vector2i, kind: int) -> void:
 	var kind_names = {0: "Bolt", 1: "Prism", 2: "Nova"}
 	print("Special gem created: %s at (%d, %d)" % [kind_names.get(kind, "Unknown"), pos.x, pos.y])
+	
+	# Play special gem creation sound
+	audio_manager.play_special_create()
 	
 	# Spawn special gem creation effect
 	_spawn_special_gem_effect(pos, kind)
@@ -768,6 +777,9 @@ func _on_echo_charged(cells: Array[Vector2i]) -> void:
 func _on_echo_detonated(cells: Array[Vector2i], multiplier: float) -> void:
 	last_multiplier = multiplier
 	print("Echo detonated: %d cells, multiplier %.2f" % [cells.size(), multiplier])
+	
+	# Play echo detonation sound - the signature audio payoff
+	audio_manager.play_echo_detonate()
 	
 	# Spawn echo detonation effect - the signature visual payoff
 	_spawn_echo_detonation(cells)
