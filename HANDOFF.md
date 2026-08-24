@@ -469,3 +469,23 @@ const BOUNCE_ANIM_DURATION: float = 0.1
 - Load a whole campaign pack, sequential chambers, and the relic-choice between chambers.
 - Wire relic `RelicEffect` → `RuleModifiers` through the run.
 - Daily Descent seeding (date-hashed seed).
+
+### Stage 6 QA — Cascade Desync & Input Lockup FIXED
+
+**Date**: 2026-08-24
+
+**Bug**: On any valid swap triggering cascades, 50+ gems vanished and input locked permanently.
+
+**Root cause**: `board_sim.try_swap()` resolves the cascade chain synchronously and emits
+`match_resolved` for every cascade depth in the same frame. The original pipeline animated each
+signal synchronously into a shared `animating_gems` list which `_animate_swap()` then overwrote,
+so `_after_clear_complete()` never fired — clear/fall/spawn/refresh never ran, leaving the board
+half-empty and `is_animating` stuck true.
+
+**Fix** (`scripts/board.gd`): buffer the synchronous cascade clears; `_animate_swap()` no longer
+clobbers `animating_gems`; run one composite clear over all cascade cells, then the
+fall/spawn/refresh chain ending in authoritative `refresh_board()` and guaranteed input unlock.
+Added `find_valid_swap()` QA helper.
+
+**Verification**: 8 consecutive valid moves + a 5-cascade (Bolt-creating) swap + rejection moves — all
+keep the board at 64/64 gems, and input unlocks after each settle (game_eval + MCP screenshot).

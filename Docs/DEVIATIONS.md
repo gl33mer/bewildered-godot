@@ -295,6 +295,33 @@ successful moves keeps objective accounting accurate and side-effect-free.
 
 ---
 
+### Stage 6 QA: Cascade Desync & Input Lockup — Fixed
+
+**Deviation/Correction**: The cascade animation pipeline was rewritten to serialize the synchronous
+multi-cascade signal burst instead of animating per-signal.
+
+**Reason** (root cause of the playtest bug): `board_sim.try_swap()` resolves the entire cascade
+chain synchronously and emits `match_resolved` for every cascade depth in the *same frame* (before
+`_animate_swap()` runs). The original pipeline called `_animate_clear()` once per synchronous signal
+on the shared `animating_gems` list, then `_animate_swap()` overwrote that list with only the two
+swap gems. The clear `finished` callbacks then erased entries no longer present, so `animating_gems`
+never emptied → `_after_clear_complete()` never fired → gravity/spawn/refresh never ran → matched
+gems stayed cleared (board half-empty) and `is_animating` stayed `true` forever (permanent input
+lock). This supersedes the Stage 4 wording that implied the Godot side animated each cascade
+"sequentially as signals come" — it in fact broke on any multi-cascade move.
+
+**Fix**: `_on_match_resolved` buffers each cascade's cleared cells into `_pending_cascade_clears`;
+`_animate_swap()` no longer touches `animating_gems` (reserved for clear tracking); a single
+`_process_match_sequence()` runs ONE composite clear over every cell cleared across all cascades,
+then the existing fall/spawn chain, then `refresh_board()` which authoritatively repopulates all 64
+gems; `_check_for_new_matches()`/`_settle_board()` always clear `is_processing_swap`.
+
+**Files Affected**: `scripts/board.gd` (also adds `find_valid_swap()` QA helper)
+
+**Spec References**: 03-GAME-DESIGN.md §Core loop (cascades), DEVIATIONS §Stage 4 (cascade sequencing)
+
+---
+
 ### Stage 7: Descent Mode & Relic Selection
 
 *Pending — to be filled during Stage 7*
