@@ -32,6 +32,7 @@ func _ready() -> void:
 	board.level_failed.connect(_on_level_failed)
 	rotate_ccw_button.pressed.connect(board.rotate_counter_clockwise)
 	rotate_cw_button.pressed.connect(board.rotate_clockwise)
+	board.board_resized.connect(_on_board_resized)
 	_refresh()
 
 func _process(_delta: float) -> void:
@@ -47,21 +48,35 @@ func _position_board_below_hud() -> void:
 		return
 	var view_size := get_viewport().get_visible_rect().size
 	var hud_bottom_screen: float = top_bar.global_position.y + top_bar.size.y
-	var board_px: float = float(board.board_height) * float(board.cell_size) + (float(board.board_height) - 1.0) * float(board.padding)
+	# Board footprint in both axes (design units, before node scale) so a
+	# rectangular grid (e.g. 6 x 8) also fits on-screen.
+	var board_w_px: float = float(board.board_width) * float(board.cell_size) + (float(board.board_width) - 1.0) * float(board.padding)
+	var board_h_px: float = float(board.board_height) * float(board.cell_size) + (float(board.board_height) - 1.0) * float(board.padding)
 	# Scale the board so it fills the space below the HUD with generous breathing
 	# room: a fixed 40px top plate below the banner (so the top gem row is clearly
-	# clear of the HUD) and 24px bottom/side margins. Never scales UP. Node scale
-	# keeps click mapping correct because get_local_mouse_position() returns
-	# design-unit local coords.
+	# clear of the HUD) and 24px bottom/side margins. Never scales UP. Fit the
+	# SMALLER of the two axis ratios so non-square boards stay fully on-screen.
+	# Node scale keeps click mapping correct because get_local_mouse_position()
+	# returns design-unit local coords.
 	var top_gap := 40.0
 	var bottom_gap := 24.0
+	var side_gap := 24.0
 	var avail_h := view_size.y - hud_bottom_screen - top_gap - bottom_gap
-	var avail_w := view_size.x - 48.0
-	var fit: float = min(min(1.0, avail_h / board_px), avail_w / board_px)
-	var scaled_px: float = board_px * fit
-	var half_vp_h := view_size.y * 0.5
+	var avail_w := view_size.x - 2.0 * side_gap
+	var fit: float = min(min(1.0, avail_h / board_h_px), avail_w / board_w_px)
 	board.scale = Vector2(fit, fit)
-	board.position = Vector2(0.0, hud_bottom_screen - half_vp_h + top_gap + scaled_px * 0.5)
+	# Dead-center horizontally; vertically, center the board in the actual play
+	# region between the HUD banner and the bottom margin. Because the fit above
+	# already scales the board to fill avail_h, its midpoint here is the true
+	# center of the empty space (no half-viewport offset), and the pivot sits at
+	# the exact visual center so rotation never clips the edges.
+	var play_top := hud_bottom_screen + top_gap
+	var play_bottom := view_size.y - bottom_gap
+	var center_y := (play_top + play_bottom) * 0.5
+	board.position = Vector2(view_size.x * 0.5, center_y)
+
+func _on_board_resized() -> void:
+	_position_board_below_hud()
 
 func _refresh() -> void:
 	if sim == null:

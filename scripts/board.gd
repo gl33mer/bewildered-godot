@@ -76,6 +76,9 @@ var coord_test_results: Array[Dictionary] = []
 signal debug_log_updated(message: String)
 signal level_cleared(level_id: String)
 signal level_failed(level_id: String)
+# Emitted when the grid is resized (dev grid-size switcher) so the HUD can
+# re-center and re-scale the board to the new dimensions.
+signal board_resized
 
 @export var current_level_index: int = 1
 
@@ -96,6 +99,11 @@ func _load_level(index: int) -> void:
 	var ok: bool = board_sim.load_level_file(os_path)
 	if not ok:
 		push_warning("[bewildered] Failed to load level %s: %s" % [current_level_id, board_sim.get_last_error()])
+	# Always trust the sim's actual grid dimensions (levels can differ from the
+	# exported defaults, and a dev grid resize must not leak into the next
+	# campaign level). Keeps board_width/board_height + gem layout consistent.
+	board_width = int(board_sim.get_width())
+	board_height = int(board_sim.get_height())
 	selected_cell = Vector2i(-1, -1)
 	cursor_cell = Vector2i(0, 0)
 	hover_cell = Vector2i(-1, -1)
@@ -115,6 +123,39 @@ func load_next_level() -> void:
 
 func retry_level() -> void:
 	_load_level(current_level_index)
+
+# Dev/QA grid-size switcher: re-init the sandbox board with new dimensions via
+# BoardSim.new_board (a fresh match-free board, no objective). Rebuilds the gem
+# instances, resets input/animation state and rotation, then asks the HUD to
+# re-center and re-scale the board to fit.
+func set_grid_size(w: int, h: int) -> void:
+	if w < 4 || h < 4:
+		push_warning("[bewildered] Refusing tiny grid %d x %d" % [w, h])
+		return
+	rotation_degrees = 0.0
+	board_sim.new_board(w, h, seed)
+	board_width = w
+	board_height = h
+	selected_cell = Vector2i(-1, -1)
+	hover_cell = Vector2i(-1, -1)
+	cursor_cell = Vector2i(0, 0)
+	reset_game_stats()
+	is_animating = false
+	is_processing_swap = false
+	_pending_cascade_clears.clear()
+	# Dev boards have no objective; suppress the level-win/fail outcome popups.
+	_level_result_handled = true
+	for gem in gem_instances:
+		if gem != null && is_instance_valid(gem):
+			gem.queue_free()
+	gem_instances = []
+	gem_instances.resize(w * h)
+	_update_selection_highlight()
+	_update_cursor_highlight()
+	_update_hover_highlight()
+	_sync_board_state()
+	emit_signal("board_resized")
+	_update_debug_log("Grid resized to %d x %d (dev sandbox)" % [w, h])
 
 func reset_game_stats() -> void:
 	total_moves = 0
@@ -302,8 +343,11 @@ func _create_debug_hud() -> void:
 func _get_cell_position(x: int, y: int) -> Vector2:
 	var board_pixel_width = board_width * cell_size + (board_width - 1) * padding
 	var board_pixel_height = board_height * cell_size + (board_height - 1) * padding
-	var offset_x = -board_pixel_width / 2.0 + cell_size / 2.0
-	var offset_y = -board_pixel_height / 2.0 + cell_size / 2.0
+	# The grid box is centered EXACTLY about local (0,0) so the Board node origin
+	# is the dead-center pivot: static placement and the 90° Tumbler rotation
+	# both revolve around the visual center, and mouse coords map 1:1.
+	var offset_x = -board_pixel_width / 2.0
+	var offset_y = -board_pixel_height / 2.0
 	return Vector2(offset_x + x * (cell_size + padding), offset_y + y * (cell_size + padding))
 
 func _update_cursor_highlight() -> void:
@@ -329,8 +373,8 @@ func _update_selection_highlight() -> void:
 func _cell_to_grid_coords(pos: Vector2) -> Vector2i:
 	var board_pixel_width = board_width * cell_size + (board_width - 1) * padding
 	var board_pixel_height = board_height * cell_size + (board_height - 1) * padding
-	var offset_x = -board_pixel_width / 2.0 + cell_size / 2.0
-	var offset_y = -board_pixel_height / 2.0 + cell_size / 2.0
+	var offset_x = -board_pixel_width / 2.0
+	var offset_y = -board_pixel_height / 2.0
 
 	var local_x = pos.x - offset_x
 	var local_y = pos.y - offset_y
@@ -588,6 +632,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Keyboard navigation
 	if event is InputEventKey && event.pressed:
 		match event.keycode:
+			KEY_1:
+				set_grid_size(6, 6)
+				return
+			KEY_2:
+				set_grid_size(8, 8)
+				return
+			KEY_3:
+				set_grid_size(10, 10)
+				return
+			KEY_4:
+				set_grid_size(6, 8)
+				return
 			KEY_E:
 				_attempt_rotate(true)
 				return

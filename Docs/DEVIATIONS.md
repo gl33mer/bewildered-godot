@@ -449,3 +449,30 @@ off-screen on non-square viewports. Replaced with the standard Match-3 **spin & 
 
 **Kept from prior stage**: per-cascade-depth clears (`clears_by_depth`), step-by-step pacing, and the
 special-elimination FX all remain.
+
+### Polish: Dead-Center Board, Grid-Size Switcher (Stage 6.5 follow-up)
+
+**Dead-center fix (real bug)**: `hud.gd`'s `_position_board_below_hud()` pinned the Board to
+`position.x = 0`, which with a grid centered about local (0,0) rendered the board hard against the
+left viewport edge. Also, `_get_cell_position()`/`_cell_to_grid_coords()` added `+cell_size/2` to the
+board-box offset, so the grid's geometric center sat at local `+cell_size/2` — shifting the rendered
+center ~27px right AND up (and making the rotation pivot eccentric). Corrected by:
+  - centering the offset at `-board_pixel/2` (no `+cell/2`) in BOTH the forward and inverse functions
+    (keeps the coordinate round-trip exact; coord self-test still ALL PASSED);
+  - in `hud.gd`, dead-centering `board.position.x = view_size.x/2` and vertically centering the board
+    in the true play region between the HUD banner and the bottom margin. Fit now considers BOTH
+    axes, so rectangular grids (6x8) stay fully on-screen.
+  Result (measured): every size (6x6, 8x8, 10x10, 6x8) is dead-centered (delta ~0) inside the play
+  region, and a 90° Tumbler rotation of the largest 10x10 keeps the board fully inside — the pivot is
+  the exact visual center.
+
+**Dev grid-size switcher (new)**: `GameBoard.set_grid_size(w,h)` re-inits the sim sandbox via
+`BoardSim.new_board(w,h,seed)` (a fresh match-free board, no objective), rebuilds gem instances,
+resets selection/rotation/state, and emits `board_resized` so the HUD re-centers/re-scales.
+Hotkeys in `_unhandled_input`: `1`=6x6, `2`=8x8, `3`=10x10, `4`=6x8. `_load_level` now syncs
+`board_width/height` from the sim so a dev resize can't leak into the next campaign level.
+
+**Massive-clear animation (verified, no change needed)**: `_animate_clear()` already loops EVERY cell
+in each wave's `cleared_cells` (the sim emits full Nova/Prism blasts, e.g. 21-26 cells, in one wave),
+playing the shrink/fade + shatter for each before gravity/refill. `_compact_gravity()` accumulates
+`empty_count` to compact columns with multiple gaps smoothly. No "snap to new face" path exists.
