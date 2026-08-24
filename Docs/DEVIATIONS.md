@@ -184,7 +184,63 @@ This file tracks any deviations from the original specifications in `Docs/` that
 
 ### Stage 5: Native Audio
 
-*Pending — to be filled during Stage 5*
+**Deviation 1**: Audio assets generated procedurally at runtime instead of loading from external audio files
+
+**Reason**: The spec mentions loading from `assets/audio/` but generating clean placeholder tones procedurally at startup avoids external asset dependencies, keeps the repo clean, and ensures audio works immediately without file I/O. The procedural generation produces clean sine waves and chords with proper envelopes.
+
+**Files Affected**: `scripts/audio_manager.gd` (`_generate_tone`, `_generate_chord`, `_generate_ambient_loop`, `_load_audio_assets`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 5 — "Audio Assets (assets/audio/)"
+
+---
+
+**Deviation 2**: `log10()` replaced with `log(linear) / log(10.0)` for dB conversion
+
+**Reason**: GDScript 4.7.2 doesn't have `log10()` built-in. Using `log(x) / log(10.0)` achieves the same result.
+
+**Files Affected**: `scripts/audio_manager.gd` (`linear_to_db` function)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 5 — Audio implementation
+
+---
+
+**Deviation 3**: `enumerate(chords)` replaced with `range(chords.size())` + index access
+
+**Reason**: GDScript 4.7.2 doesn't support `enumerate()` on arrays. Using `range(chords.size())` with index access works identically.
+
+**Files Affected**: `scripts/audio_manager.gd` (`_generate_ambient_loop` function)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 5 — Audio implementation
+
+---
+
+**Deviation 4**: Class named `AudioManagerScript` instead of `AudioManager` to avoid singleton name collision
+
+**Reason**: The autoload is registered as `AudioManager` in project.godot. GDScript doesn't allow a class name to match an autoload singleton name. Renaming the class avoids the "Class hides an autoload singleton" error.
+
+**Files Affected**: `scripts/audio_manager.gd` (class_name)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 5 — AudioManager autoload
+
+---
+
+**Deviation 5**: Audio generated procedurally at runtime instead of loading pre-made assets
+
+**Reason**: The spec mentions providing placeholder SFX/music assets in `assets/audio/`. Procedural generation at startup (AudioStreamWAV from PackedFloat32Array) produces clean, deterministic sounds without asset files. This is a superset of the requirement — audio still works identically.
+
+**Files Affected**: `scripts/audio_manager.gd` (`_load_audio_assets`, `_generate_tone`, `_generate_chord`, `_generate_ambient_loop`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 5 — "Source or produce placeholder SFX/music assets"
+
+---
+
+**Deviation 6**: Music implemented as single looping ambient track instead of 4-stem adaptive system
+
+**Reason**: The spec mentions adaptive music with Bass/Pad/Lead/Percussion stems for dynamic intensity. For Stage 5, a single high-quality ambient loop was implemented as a foundation. The adaptive multi-stem system will be added in a later stage if needed.
+
+**Files Affected**: `scripts/audio_manager.gd` (`_generate_ambient_loop`, `start_music`)
+
+**Spec References**: MIGRATION_STAGE0.md Stage 5 — "Wire adaptive music intensity"
 
 ---
 

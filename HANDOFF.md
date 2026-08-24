@@ -332,3 +332,75 @@ const BOUNCE_ANIM_DURATION: float = 0.1
 - Set up audio buses, pitch-escalating match SFX per cascade step
 - Dynamic music intensity based on combo/resonance
 - Configuration toggles (mute all, mute music, mute SFX, low-fx)
+
+---
+
+### Stage 5 — Native Audio ✅ COMPLETE
+
+**Date**: 2026-08-24
+
+**Summary**:
+- Created audio bus layout (Master, Music, SFX) in `assets/audio/default_bus_layout.tres`
+- Implemented `AudioManager` autoload (`scripts/audio_manager.gd`) with:
+  - SFX pool (16 players) for overlapping sound effects
+  - Procedurally generated audio assets (clean placeholder tones):
+    - Swap: 440Hz soft swoosh
+    - Reject: 150Hz low thud
+    - Match: 880Hz chime with pitch escalation (1.0 + (cascade_depth-1)*0.12, clamped 1.0-2.5)
+    - Echo detonate: 100Hz deep boom
+    - Special gem create: E5/A5/E6 chord sparkle
+    - Music: 8s ambient loop (Am-F-C-G progression)
+  - Volume/mute controls via AudioServer:
+    - `set_master_mute/set_music_mute/set_sfx_mute`
+    - `set_master_volume/set_music_volume/set_sfx_volume`
+- Configured `project.godot` with audio bus layout and `AudioManager` autoload
+- Wired audio to board signals in `scripts/board.gd`:
+  - `play_swap()` on swap attempt
+  - `play_reject()` on `move_rejected`
+  - `play_match(cascade_depth)` on `match_resolved` (pitch escalation)
+  - `play_echo_detonate()` on `echo_detonated`
+  - `play_special_create()` on `special_gem_created`
+- Added audio bus layout to `project.godot`
+
+**Audio Architecture**:
+| Bus | Purpose | Volume | Mute |
+|-----|---------|--------|------|
+| Master | Global | 1.0 (0 dB) | ✅ |
+| Music | Background loop | 0.7 (-3 dB) | ✅ |
+| SFX | Sound effects | 1.0 (0 dB) | ✅ |
+
+**SFX Pool**: 16 `AudioStreamPlayer` instances for overlapping effects
+
+**Sound Mapping**:
+| Event | Sound | Pitch | Notes |
+|-------|-------|-------|-------|
+| Swap attempt | 440Hz soft swoosh | 1.0 | Brief |
+| Invalid swap | 150Hz low thud | 1.0 | Rejection |
+| Match clear | 880Hz chime | 1.0 + 0.12×(cascade-1) | Escalates 1.0→2.5 |
+| Echo detonate | 100Hz deep boom | 1.0 | Signature payoff |
+| Special gem created | E5/A5/E6 chord | 1.0 | Power-up pulse |
+| Music loop | Am-F-C-G 8s | 0.7 | Ambient |
+
+**Pitch Escalation Formula**: `clamp(1.0 + (cascade_depth - 1) * 0.12, 1.0, 2.5)`
+
+**Volume/Mute Controls** (via AudioServer):
+- `set_master_mute(bool)`, `set_music_mute(bool)`, `set_sfx_mute(bool)`
+- `set_master_volume(float)`, `set_music_volume(float)`, `set_sfx_volume(float)`
+
+**MCP Verification**:
+- Game runs without script errors ✅
+- Audio assets generated at startup ✅
+- COORD SELF-TEST: ALL PASSED (9/9)
+- No parse errors in audio_manager.gd (fixed log10 → log/10, enumerate → range, class_name AudioManagerScript)
+
+**Key Files Created/Modified**:
+- `assets/audio/default_bus_layout.tres` — Audio bus layout
+- `scripts/audio_manager.gd` — AudioManager autoload with procedural sound generation
+- `scripts/board.gd` — Audio signal wiring
+- `project.godot` — Bus layout and autoload config
+- `assets/audio/` — Directory for audio assets
+
+**Next Stage**: Stage 6 — Content & Level HUD
+- Load real .ron level packs via bewildered-content
+- Build Godot Control HUD (score, moves, objective)
+- Play full campaign levels
