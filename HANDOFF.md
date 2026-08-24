@@ -489,3 +489,21 @@ Added `find_valid_swap()` QA helper.
 
 **Verification**: 8 consecutive valid moves + a 5-cascade (Bolt-creating) swap + rejection moves — all
 keep the board at 64/64 gems, and input unlocks after each settle (game_eval + MCP screenshot).
+
+### Stage 6 QA Refinements (HUD passthrough, swap retention, gravity, emoji, board fit)
+
+**Date**: 2026-08-24
+
+Companion to the Stage 6 QA cascade fix (`f525925`). First playtest of the QoL layout surfaced five
+visual/layout issues, all fixed and verified in this pass:
+1. **HUD click passthrough** — HUD TopBar + containers now `mouse_filter=IGNORE` (clicks reach the
+   board's top rows).
+2. **Swap retention** — `_animate_swap` swaps `gem_instances` entries so an unmatched swapped gem
+   stays put (verified: 0 kind mismatches vs the sim after every swap).
+3. **Gravity** — cascade presentation rewritten as a linear `await` coroutine (no orphaned timers),
+   existing gems slide, new gems drop from above row −1.
+4. **Special emoji** — overlay `z_index=2`, PRESET_CENTER.
+5. **Board fit** — board scaled to the space below the HUD, padding 8→6.
+
+Verified: 10 consecutive swaps keep 64/64 gems, 0 mismatches, input unlocked; top-row click reaches
+the board; click mapping correct under scale; emoji centered.

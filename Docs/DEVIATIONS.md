@@ -355,3 +355,25 @@ When adding a deviation, use this format:
 
 **Spec References**: <Links to relevant spec sections in Docs/>
 ```
+### Stage 6 QA Refinements: HUD Passthrough, Swap Retention, Gravity, Emoji, Board Fit
+
+**Deviations/Refinements** (from the first Stage 6 playtest feedback loop):
+- **HUD click passthrough**: `scenes/hud.tscn` sets `mouse_filter = MOUSE_FILTER_IGNORE` on the
+  TopBar and all its containers so the HUD no longer intercepts clicks over the top rows of the
+  board. Only interactive buttons (the dialog scene) accept clicks.
+- **Swap retention**: `_animate_swap` swaps the `gem_instances` array entries to mirror the nodes'
+  physical swap, so `_get_gem_instance()` returns the right node per cell; an unmatched swapped gem
+  is never misplaced or cleared (only cells in `match_resolved` are cleared).
+- **Gravity (cascade presentation)**: the multi-cascade presentation was rewritten from a
+  Timer/tween-signal chain into a single linear `await` coroutine
+  (`_run_cascade_sequence`: composite clear → per-column gravity compact → new-gem spawn from just
+  above row −1). This eliminates orphaned Timers that used to re-fire duplicate cascade chains
+  (the root cause of transient desync and intermittent input lock in the previous fix).
+- **Special emoji**: overlay `z_index = 2` and `PRESET_CENTER` anchors so the glyph sits on the gem.
+- **Board fit & spacing**: the board is scaled to fill the space below the HUD and positioned
+  ~24px under the bar; padding default changed 8 → 6. Click mapping stays correct under scale
+  because `get_local_mouse_position()` is scale-aware.
+
+**Files Affected**: `scenes/hud.tscn`, `scripts/board.gd`, `scripts/gem.gd`, `scripts/hud.gd`
+
+**Spec References**: MIGRATION Stage 3 (input), Stage 4 (juice/gravity), Stage 6 (HUD)
