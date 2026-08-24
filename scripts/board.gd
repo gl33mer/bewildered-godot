@@ -131,7 +131,8 @@ func _create_highlights() -> void:
 	_create_debug_hud()
 
 func _initialize_board() -> void:
-	board_sim.new_board(board_width, board_height, seed)
+	# Create gems first, then connect signals, then initialize board
+	# This ensures signals are ready before any cascades fire
 	
 	for gem in gem_instances:
 		if gem != null && is_instance_valid(gem):
@@ -139,29 +140,11 @@ func _initialize_board() -> void:
 	gem_instances.clear()
 	gem_instances.resize(board_width * board_height)
 	
-	var board_pixel_width = board_width * cell_size + (board_width - 1) * padding
-	var board_pixel_height = board_height * cell_size + (board_height - 1) * padding
-	var offset_x = -board_pixel_width / 2.0 + cell_size / 2.0
-	var offset_y = -board_pixel_height / 2.0 + cell_size / 2.0
+	# Initialize board_sim (may fire cascade signals immediately)
+	board_sim.new_board(board_width, board_height, seed)
 	
-	for y in range(board_height):
-		for x in range(board_width):
-			var cell = board_sim.get_cell(x, y)
-			if not cell.empty:
-				var kind = cell.kind
-				var has_echo = cell.has_echo
-				
-				var gem_instance = gem_scene.instantiate()
-				gem_instance.set_gem(kind, has_echo)
-				
-				var pos_x = offset_x + x * (cell_size + padding)
-				var pos_y = offset_y + y * (cell_size + padding)
-				gem_instance.position = Vector2(pos_x, pos_y)
-				
-				add_child(gem_instance)
-				gem_instances[y * board_width + x] = gem_instance
-			else:
-				gem_instances[y * board_width + x] = null
+	# Sync visual board state with simulation
+	_sync_board_state()
 	
 	_update_cursor_highlight()
 
