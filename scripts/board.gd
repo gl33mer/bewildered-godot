@@ -582,6 +582,10 @@ func _animate_clear(cleared_cells: Array[Vector2i], gem_kind: int) -> void:
 		if gem != null && is_instance_valid(gem):
 			animating.append(gem)
 			
+			# Immediately mark this cell as empty in the array
+			var idx = cell.y * board_width + cell.x
+			gem_instances[idx] = null
+			
 			# Spawn particle burst for this gem
 			_spawn_clear_particles(gem, gem_kind)
 			
