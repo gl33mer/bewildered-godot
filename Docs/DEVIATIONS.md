@@ -377,3 +377,23 @@ When adding a deviation, use this format:
 **Files Affected**: `scenes/hud.tscn`, `scripts/board.gd`, `scripts/gem.gd`, `scripts/hud.gd`
 
 **Spec References**: MIGRATION Stage 3 (input), Stage 4 (juice/gravity), Stage 6 (HUD)
+
+### Stage 6 QA: Illegal-Move Acceptance — Match-Free Board + Swap Validation
+
+**Deviation/Correction**: `bewildered-core` now generates a **match-free opening board** and
+`try_swap` validates that the swap itself caused a match.
+
+**Reason**: `Board::with_rules` filled the grid with purely random gems, so the opening board almost
+always contained pre-existing 3-in-a-row matches. `try_swap` then called `find_all_matches()` on the
+whole board and returned `Success` if any match existed anywhere — so an unrelated swap was accepted
+just because a pre-existing match sat elsewhere, clearing it + cascading (an illegal-move acceptance
+bug). Fixed by (1) filtering each generated gem against the two to its left / two above it, and
+(2) reverting & returning `Illegal`/`NoMatch` unless a resulting match involves a swapped cell (or a
+special gem was created by the swap).
+
+**Files Affected**: `rust/crates/bewildered-core/src/lib.rs` (with two new regression tests)
+
+**Spec References**: 03-GAME-DESIGN.md §Core loop (swap legality)
+
+Note: the HUD-overlap item in this review was already resolved in the prior QA pass (`scripts/hud.gd`
+places the board 24px below the bar and scales it to fit); it was re-verified rather than re-fixed.

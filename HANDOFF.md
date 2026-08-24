@@ -507,3 +507,14 @@ visual/layout issues, all fixed and verified in this pass:
 
 Verified: 10 consecutive swaps keep 64/64 gems, 0 mismatches, input unlocked; top-row click reaches
 the board; click mapping correct under scale; emoji centered.
+
+### Stage 6 QA: Illegal-Move Acceptance Fix
+
+**Date**: 2026-08-24
+
+Code review found `bewildered-core` accepting illegal moves: `with_rules` filled random boards that
+almost always had pre-existing matches, and `try_swap` accepted Success whenever *any* match existed
+(not necessarily caused by the swap). Fixed by generating a match-free board and requiring the swap
+to create a match involving a swapped cell (or a special). Added tests `new_board_is_match_free` and
+`unrelated_swap_is_rejected`. The HUD-overlap item was already fixed (board sits 24px below the bar)
+and was re-verified rather than re-applied.
