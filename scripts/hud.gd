@@ -11,6 +11,8 @@ class_name GameHUD
 var board: Node2D
 var sim: RefCounted
 var dialog: Control = null
+var top_bar: PanelContainer
+var _board_positioned: bool = false
 
 @onready var level_title: Label = %LevelTitle
 @onready var objective_label: Label = %ObjectiveLabel
@@ -23,12 +25,35 @@ var dialog: Control = null
 func _ready() -> void:
 	board = get_node(board_path)
 	sim = board.get_board_sim()
+	top_bar = get_node_or_null("Root/TopBar")
 	board.level_cleared.connect(_on_level_cleared)
 	board.level_failed.connect(_on_level_failed)
 	_refresh()
 
 func _process(_delta: float) -> void:
+	# Position the board once the HUD bar has a real size (layout runs after
+	# _ready). Keeps the top rows of gems fully clickable below the HUD.
+	if not _board_positioned and top_bar != null and top_bar.size.y > 0.0:
+		_position_board_below_hud()
+		_board_positioned = true
 	_refresh()
+
+func _position_board_below_hud() -> void:
+	if board == null:
+		return
+	var view_size := get_viewport().get_visible_rect().size
+	var hud_bottom_screen: float = top_bar.global_position.y + top_bar.size.y
+	var board_px: float = float(board.board_height) * float(board.cell_size) + (float(board.board_height) - 1.0) * float(board.padding)
+	# Scale the board so it fills the space below the HUD (24px gaps top + bottom,
+	# 24px side margins) while never scaling UP. Node scale keeps click mapping
+	# correct because get_local_mouse_position() returns design-unit local coords.
+	var avail_h := view_size.y - hud_bottom_screen - 48.0
+	var avail_w := view_size.x - 48.0
+	var fit: float = min(min(1.0, avail_h / board_px), avail_w / board_px)
+	var scaled_px: float = board_px * fit
+	var half_vp_h := view_size.y * 0.5
+	board.scale = Vector2(fit, fit)
+	board.position = Vector2(0.0, hud_bottom_screen - half_vp_h + 24.0 + scaled_px * 0.5)
 
 func _refresh() -> void:
 	if sim == null:

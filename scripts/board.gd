@@ -6,7 +6,7 @@ class_name GameBoard
 @export var board_height: int = 8
 @export var seed: int = 12345
 @export var cell_size: float = 64.0
-@export var padding: float = 8.0
+@export var padding: float = 6.0
 
 @onready var board_sim: RefCounted = BoardSim.new()
 @onready var gem_scene: PackedScene = preload("res://scenes/gem.tscn")
@@ -420,7 +420,16 @@ func _animate_swap(a: Vector2i, b: Vector2i) -> void:
 	var pos_a = _get_cell_position(a.x, a.y)
 	var pos_b = _get_cell_position(b.x, b.y)
 	
-	# NOTE: the swap gems are intentionally NOT added to animating_gems — that
+	# The two nodes physically trade cells during the swap animation, so the
+	# gem_instances array must trade with them. Otherwise _get_gem_instance()
+	# returns the WRONG node for a cell, which could clear/misplace an unmatched
+	# swapped gem (e.g. only one side of the swap actually matches).
+	var ia := a.y * board_width + a.x
+	var ib := b.y * board_width + b.x
+	gem_instances[ia] = gem_b
+	gem_instances[ib] = gem_a
+	
+	# TODO: the swap gems are intentionally NOT added to animating_gems — that
 	# array is reserved for tracking the clear animation so the cascade chain
 	# advances exactly once after every matched gem has been cleared.
 	
@@ -481,26 +490,47 @@ func _animate_rejection_snapback(a: Vector2i, b: Vector2i) -> void:
 	_sync_board_state()
 
 func _process_match_sequence() -> void:
-	# board_sim fired every cascade signal synchronously during try_swap, so the
-	# sim already holds the final post-cascade board. We buffered the per-cascade
-	# clears in _pending_cascade_clears; now run ONE composite clear over every
-	# cell cleared across all cascades, then let the existing fall/spawn/refresh
-	# chain settle the board to the authoritative 64-gem state and unlock input.
-	animating_gems.clear()
+	# Called after the swap animation. board_sim emitted every cascade signal
+	# synchronously during try_swap, so it already holds the final board and the
+	# per-cascade clears were buffered in _pending_cascade_clears. Run the whole
+	# cascade presentation as ONE linear await coroutine — no orphaned timers can
+	# call back into the chain — guaranteed to end in an authoritative
+	# refresh_board() and an input unlock.
+	_run_cascade_sequence()
+
+func _run_cascade_sequence() -> void:
 	var all_cells: Array[Vector2i] = []
-	var representative_kind: int = 0
+	var rep_kind := 0
 	for entry in _pending_cascade_clears:
-		representative_kind = entry["kind"]
+		rep_kind = entry["kind"]
 		for cell in entry["cells"]:
 			if not all_cells.has(cell):
 				all_cells.append(cell)
-	
 	if all_cells.is_empty():
-		# No matched cells (unexpected on a successful swap) — settle directly.
 		_settle_board()
 		return
-	
-	_animate_clear(all_cells, representative_kind)
+
+	# 1) Composite clear of every cell cleared across all cascades.
+	var clear_time := _animate_clear(all_cells, rep_kind)
+	if clear_time > 0.0:
+		await get_tree().create_timer(clear_time).timeout
+
+	# 2) Gravity compact — existing gems slide down into the holes.
+	var fall_time := _compact_gravity()
+	if fall_time > 0.0:
+		await get_tree().create_timer(fall_time).timeout
+
+	# 3) Spawn new gems from just above the top row into their destination cells.
+	var spawn_time := _spawn_new_gems()
+	if spawn_time > 0.0:
+		await get_tree().create_timer(spawn_time).timeout
+
+	# 4) Authoritative sync + unlock.
+	refresh_board()
+	_update_cursor_highlight()
+	_update_hover_highlight()
+	is_animating = false
+	is_processing_swap = false
 
 func _settle_board() -> void:
 	refresh_board()
@@ -646,158 +676,78 @@ func _clear_rejection_flash() -> void:
 			gem.modulate = Color(1, 1, 1, 1)
 	rejected_cells.clear()
 
-func _animate_clear(cleared_cells: Array[Vector2i], gem_kind: int) -> void:
-	is_animating = true
-	var animating = []
-	
+func _animate_clear(cleared_cells: Array[Vector2i], gem_kind: int) -> float:
+	# Fade/scale out the gems at the given cells. Returns the clear duration so
+	# the coroutine can await the animation before applying gravity.
 	for cell in cleared_cells:
 		var gem = _get_gem_instance(cell.x, cell.y)
 		if gem != null && is_instance_valid(gem):
-			animating.append(gem)
-			
-			# Immediately mark this cell as empty in the array
 			var idx = cell.y * board_width + cell.x
 			gem_instances[idx] = null
-			
-			# Spawn particle burst for this gem
 			_spawn_clear_particles(gem, gem_kind)
-			
-			# Animate scale down and fade out
 			var tween = create_tween()
 			tween.set_parallel(true)
 			tween.tween_property(gem, "scale", Vector2(0, 0), CLEAR_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 			tween.tween_property(gem, "modulate:a", 0.0, CLEAR_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-			tween.finished.connect(_on_gem_clear_finished.bind(gem))
-			animating_gems.append(gem)
-	
-	if animating.is_empty():
-		is_animating = false
-		_after_clear_complete()
-func _on_gem_clear_finished(gem: Node2D) -> void:
-	if gem != null && is_instance_valid(gem):
-		gem.queue_free()
-	animating_gems.erase(gem)
-	if animating_gems.is_empty():
-		is_animating = false
-		_after_clear_complete()
+			tween.finished.connect(gem.queue_free.bind())
+	return CLEAR_ANIM_DURATION
 
-func _after_clear_complete() -> void:
-	# After clear, animate gravity fall for new gems
-	_animate_gravity_fall()
-
-func _animate_gravity_fall() -> void:
-	is_animating = true
-	
-	# For each column, find gems that need to fall
-	var any_falling = false
-	var max_fall_time = 0.0
-	
+func _compact_gravity() -> float:
+	# Compact remaining live gems downward per column into the cleared holes.
+	# Existing gems slide from their current cell down to their new cell. Returns
+	# the longest fall (incl. bounce) so the coroutine can await it, or 0 if
+	# nothing moved.
+	var max_fall_time := 0.0
 	for x in range(board_width):
-		var fall_distance = 0
+		var empty_count := 0
 		for y in range(board_height - 1, -1, -1):
 			var idx = y * board_width + x
-			var cell = board_sim.get_cell(x, y)
 			var gem = gem_instances[idx]
-			
-			if cell.empty && gem != null && is_instance_valid(gem):
-				# This gem should fall - find how far
-				var target_y = y
-				while target_y + 1 < board_height && board_sim.get_cell(x, target_y + 1).empty:
-					target_y += 1
-				
-				if target_y > y:
-					fall_distance = target_y - y
-					var target_pos = _get_cell_position(x, target_y)
-					var fall_duration = FALL_ANIM_DURATION * fall_distance
-					max_fall_time = max(max_fall_time, fall_duration)
-					
-					var tween = create_tween()
-					tween.tween_property(gem, "position", target_pos, fall_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-					# Add subtle bounce at the end
-					tween.tween_property(gem, "scale", Vector2(1.1, 0.9), BOUNCE_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-					tween.tween_property(gem, "scale", Vector2(1.0, 1.0), BOUNCE_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-					
-					any_falling = true
-					
-					# Update gem_instances array
-					gem_instances[target_y * board_width + x] = gem
-					gem_instances[y * board_width + x] = null
-	
-	if any_falling:
-		# Wait for longest fall to complete
-		var timer = Timer.new()
-		timer.one_shot = true
-		timer.wait_time = max_fall_time + BOUNCE_ANIM_DURATION
-		timer.timeout.connect(_after_fall_complete)
-		add_child(timer)
-		timer.start()
-	else:
-		is_animating = false
-		_after_fall_complete()
+			if gem == null || !is_instance_valid(gem):
+				empty_count += 1
+			elif empty_count > 0:
+				var target_y = y + empty_count
+				var target_pos = _get_cell_position(x, target_y)
+				var fall_duration = FALL_ANIM_DURATION * empty_count
+				max_fall_time = max(max_fall_time, fall_duration)
+				var tween = create_tween()
+				tween.tween_property(gem, "position", target_pos, fall_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				tween.tween_property(gem, "scale", Vector2(1.1, 0.9), BOUNCE_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				tween.tween_property(gem, "scale", Vector2(1.0, 1.0), BOUNCE_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				gem_instances[target_y * board_width + x] = gem
+				gem_instances[y * board_width + x] = null
+	if max_fall_time > 0.0:
+		return max_fall_time + BOUNCE_ANIM_DURATION
+	return 0.0
 
-func _after_fall_complete() -> void:
-	# After gravity fall, spawn new gems at top and animate them falling in
-	_animate_new_gems_spawn()
-
-func _animate_new_gems_spawn() -> void:
-	# Spawn new gems at top of board and animate them falling in
-	var any_new = false
-	var max_fall_time = 0.0
-	
+func _spawn_new_gems() -> float:
+	# Spawn brand-new gems just above the top row and drop them into their
+	# destination cells (the holes the gravity compact left at the top of each
+	# column). Returns the longest drop (incl. bounce), or 0 if none spawned.
+	var max_fall_time := 0.0
 	for x in range(board_width):
 		for y in range(board_height):
 			var idx = y * board_width + x
 			var cell = board_sim.get_cell(x, y)
 			var gem = gem_instances[idx]
-			
 			if not cell.empty && (gem == null || !is_instance_valid(gem)):
-				# Need to spawn new gem
 				var kind = cell.kind
 				var has_echo = cell.has_echo
 				var special = cell.get("special", 0)
-				
 				var gem_instance = gem_scene.instantiate()
 				gem_instance.set_gem(kind, has_echo, special)
-				
-				# Start above the board
-				var start_pos = _get_cell_position(x, -1)
-				var end_pos = _get_cell_position(x, y)
-				gem_instance.position = start_pos
-				
+				gem_instance.position = _get_cell_position(x, -1)
 				add_child(gem_instance)
 				gem_instances[idx] = gem_instance
-				
 				var fall_duration = FALL_ANIM_DURATION * (y + 1)
 				max_fall_time = max(max_fall_time, fall_duration)
-				
 				var tween = create_tween()
-				tween.tween_property(gem_instance, "position", end_pos, fall_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-				# Add bounce
+				tween.tween_property(gem_instance, "position", _get_cell_position(x, y), fall_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 				tween.tween_property(gem_instance, "scale", Vector2(1.1, 0.9), BOUNCE_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 				tween.tween_property(gem_instance, "scale", Vector2(1.0, 1.0), BOUNCE_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-				
-				any_new = true
-	
-	if any_new:
-		var timer = Timer.new()
-		timer.one_shot = true
-		timer.wait_time = max_fall_time + BOUNCE_ANIM_DURATION
-		timer.timeout.connect(_check_for_new_matches)
-		add_child(timer)
-		timer.start()
-	else:
-		is_animating = false
-		_check_for_new_matches()
-
-func _check_for_new_matches() -> void:
-	# After all animations complete, check if there are new matches (cascade)
-	# The board_sim will have already processed this via try_swap cascade loop
-	# We just need to refresh the visual state
-	refresh_board()
-	_update_cursor_highlight()
-	_update_hover_highlight()
-	is_animating = false
-	is_processing_swap = false
+	if max_fall_time > 0.0:
+		return max_fall_time + BOUNCE_ANIM_DURATION
+	return 0.0
 
 func _sync_board_state() -> void:
 	# Sync visual board state with board_sim after animations
