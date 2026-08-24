@@ -1,7 +1,11 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/board.tscn" id="1_0"]
+[ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="2_hud"]
 
 [node name="Main" type="Node2D"]
 
 [node name="Board" parent="." instance=ExtResource("1_0")]
+
+[node name="HUD" parent="." instance=ExtResource("2_hud")]
+board_path = NodePath("../Board")

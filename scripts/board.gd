@@ -65,13 +65,54 @@ var last_match_count: int = 0
 var coord_test_results: Array[Dictionary] = []
 
 signal debug_log_updated(message: String)
+signal level_cleared(level_id: String)
+signal level_failed(level_id: String)
+
+@export var current_level_index: int = 1
+
+var current_level_id: String = "campaign-001"
+var _level_result_handled: bool = false
 
 func _ready():
 	_connect_signals()
 	_create_highlights()
-	_initialize_board()
+	_load_level(current_level_index)
 	_create_debug_hud()
 	_run_coord_self_test()
+
+func _load_level(index: int) -> void:
+	current_level_id = "campaign-%03d" % index
+	var res_path := "res://levels/%s.ron" % current_level_id
+	var os_path := ProjectSettings.globalize_path(res_path)
+	var ok: bool = board_sim.load_level_file(os_path)
+	if not ok:
+		push_warning("[bewildered] Failed to load level %s: %s" % [current_level_id, board_sim.get_last_error()])
+	selected_cell = Vector2i(-1, -1)
+	cursor_cell = Vector2i(0, 0)
+	hover_cell = Vector2i(-1, -1)
+	reset_game_stats()
+	_level_result_handled = false
+	# Reset the gem instance array for the (re)loaded level's grid.
+	for gem in gem_instances:
+		if gem != null && is_instance_valid(gem):
+			gem.queue_free()
+	gem_instances = []
+	gem_instances.resize(board_width * board_height)
+	_sync_board_state()
+
+func load_next_level() -> void:
+	current_level_index += 1
+	_load_level(current_level_index)
+
+func retry_level() -> void:
+	_load_level(current_level_index)
+
+func reset_game_stats() -> void:
+	total_moves = 0
+	total_score = 0
+	last_match_count = 0
+	last_cascade_depth = 0
+	last_multiplier = 1.0
 
 func _connect_signals() -> void:
 	board_sim.match_resolved.connect(_on_match_resolved)
@@ -527,8 +568,9 @@ func refresh_board() -> void:
 					add_child(gem_instance)
 					gem_instances[idx] = gem_instance
 				
-				gem_instance.set_gem(cell.kind, cell.has_echo)
-				
+				var special = cell.get("special", 0)
+				gem_instance.set_gem(cell.kind, cell.has_echo, special)
+
 				var pos = _get_cell_position(x, y)
 				gem_instance.position = pos
 			else:
@@ -555,7 +597,16 @@ func _process(delta: float) -> void:
 			_clear_rejection_flash()
 		else:
 			_apply_rejection_flash()
-	
+
+	# Level outcome detection (fires once per level via the guard flag).
+	if not _level_result_handled:
+		if board_sim.is_level_cleared():
+			_level_result_handled = true
+			emit_signal("level_cleared", current_level_id)
+		elif board_sim.is_level_failed():
+			_level_result_handled = true
+			emit_signal("level_failed", current_level_id)
+
 	_update_debug_hud()
 
 func _clear_rejection_flash() -> void:
@@ -674,9 +725,10 @@ func _animate_new_gems_spawn() -> void:
 				# Need to spawn new gem
 				var kind = cell.kind
 				var has_echo = cell.has_echo
+				var special = cell.get("special", 0)
 				
 				var gem_instance = gem_scene.instantiate()
-				gem_instance.set_gem(kind, has_echo)
+				gem_instance.set_gem(kind, has_echo, special)
 				
 				# Start above the board
 				var start_pos = _get_cell_position(x, -1)

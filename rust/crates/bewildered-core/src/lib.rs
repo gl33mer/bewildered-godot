@@ -75,6 +75,7 @@ impl RuleModifiers {
 pub struct Gem {
     pub kind: GemKind,
     pub echo: Option<EchoCharge>,
+    pub special: Option<SpecialGem>,
 }
 
 /// Special gem types created by matches of 4+.
@@ -196,6 +197,10 @@ pub struct Board {
     pub resonance_stack: usize,
     /// Rule modifiers from active relics.
     pub rule_modifiers: RuleModifiers,
+    /// Gems (by position and kind) cleared during the most recent successful
+    /// move — captured at clear-time (the board refills, so kinds are otherwise
+    /// lost). Used for authoritative objective tracking.
+    pub cleared_this_move: Vec<(usize, usize, GemKind)>,
 }
 
 impl Board {
@@ -221,6 +226,7 @@ impl Board {
             *gem = Some(Gem {
                 kind: gem_types[kind_idx],
                 echo: None,
+                special: None,
             });
         }
 
@@ -234,6 +240,7 @@ impl Board {
             resonance_multiplier: 1.0,
             resonance_stack: 0,
             rule_modifiers,
+            cleared_this_move: Vec::new(),
         }
     }
 
@@ -264,7 +271,7 @@ impl Board {
     pub fn set_gem(&mut self, row: usize, col: usize, kind: GemKind) {
         if row < self.height && col < self.width {
             let idx = self.idx(row, col);
-            self.gems[idx] = Some(Gem { kind, echo: None });
+            self.gems[idx] = Some(Gem { kind, echo: None, special: None });
         }
     }
 
@@ -274,6 +281,11 @@ impl Board {
             let idx = self.idx(row, col);
             self.gems[idx] = None;
         }
+    }
+
+    /// Get the kind of the gem at a flat index (borrow-free helper).
+    fn gem_kind_at(gems: &[Option<Gem>], idx: usize) -> Option<GemKind> {
+        gems.get(idx).and_then(|g| g.as_ref()).map(|g| g.kind)
     }
 
     /// Try to swap two adjacent gems. Returns the move outcome.
@@ -313,6 +325,7 @@ impl Board {
         // Reset resonance for this move
         self.resonance_multiplier = 1.0;
         self.resonance_stack = 0;
+        self.cleared_this_move.clear();
 
         // Process matches and cascades with echo detonation
         let total_cascades = self.process_matches(initial_matches.clone());
@@ -561,29 +574,51 @@ impl Board {
             let echo_duration = self.rule_modifiers.echo_duration();
             for m in &current_matches {
                 for &(r, c) in &m.cells {
-                    if let Some(gem) = self.gem_mut(r, c) {
-                        // Create echo charge on the cell (will be carried by new gem after gravity)
-                        // Use rule modifiers for echo duration
-                        gem.echo = Some(EchoCharge::with_duration(echo_duration));
-                        // Clear the gem
+                    let cleared_kind = self.gem(r, c).map(|g| g.kind);
+                    if let Some(kind) = cleared_kind {
+                        if let Some(gem) = self.gem_mut(r, c) {
+                            // Create echo charge on the cell (will be carried by new gem after gravity)
+                            gem.echo = Some(EchoCharge::with_duration(echo_duration));
+                        }
                         self.remove_gem(r, c);
+                        self.cleared_this_move.push((r, c, kind));
                     }
                 }
             }
 
             // Clear extra cells from detonations/specials
             for (r, c) in extra_clear_cells {
-                self.remove_gem(r, c);
+                if let Some(kind) = self.gem(r, c).map(|g| g.kind) {
+                    self.cleared_this_move.push((r, c, kind));
+                    self.remove_gem(r, c);
+                }
             }
 
             // Clear Nova color if present
             if let Some(color) = nova_color {
                 for i in 0..self.gems.len() {
-                    if let Some(gem) = &self.gems[i] {
-                        if gem.kind == color {
-                            self.gems[i] = None;
-                        }
+                    let is_nova_kind = Self::gem_kind_at(&self.gems, i) == Some(color);
+                    if is_nova_kind {
+                        self.cleared_this_move
+                            .push((i / self.width, i % self.width, color));
+                        self.gems[i] = None;
                     }
+                }
+            }
+
+            // Persist special gems created by this cascade step: place the
+            // special gem at the center of its matching run so it persists on
+            // the board as a real gem (survives gravity/refill, is reported via
+            // get_cell.special and rendered by Godot as an emoji overlay).
+            for m in &current_matches {
+                if let Some(special) = m.special_type {
+                    let (cr, cc) = m.cells[m.cells.len() / 2];
+                    let idx = self.idx(cr, cc);
+                    self.gems[idx] = Some(Gem {
+                        kind: m.kind,
+                        echo: None,
+                        special: Some(special),
+                    });
                 }
             }
 
@@ -633,6 +668,7 @@ impl Board {
                     self.gems[idx] = Some(Gem {
                         kind: self.gem_types[kind_idx],
                         echo: None,
+                        special: None,
                     });
                 }
             }
@@ -805,4 +841,72 @@ pub fn calculate_score(outcome: &MoveOutcome, combo: usize, rule_modifiers: &Rul
     }
 
     score
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 4-in-a-row match must leave a horizontal Bolt special gem persisted on
+    /// the board (not just fire a create signal). This guards the FFI contract
+    /// where Godot reads `get_cell().special` to render the emoji overlay.
+    #[test]
+    fn four_in_a_row_persists_bolt_special_gem() {
+        // Search across deterministic seeds: the 4-run must place a horizontal
+        // Bolt onto the board. Sometimes a later cascade legitimately re-matches
+        // and re-clears the bolt (correct behavior); we assert that for at least
+        // one seed the bolt survives to the final board, proving the special gem
+        // is persisted on the board (not merely signalled).
+        let mut surviving_seed = None;
+        for seed in 0..=400u64 {
+            let mut board = Board::new(5, 5, seed, vec![
+                GemKind::Circle,
+                GemKind::Triangle,
+                GemKind::Square,
+            ]);
+
+            // Fill a clean two-color checkerboard (no pre-existing 3-in-a-rows).
+            let checker = |i: usize, j: usize| {
+                if (i + j) % 2 == 0 {
+                    GemKind::Circle
+                } else {
+                    GemKind::Triangle
+                }
+            };
+            for i in 0..board.height {
+                for j in 0..board.width {
+                    board.set_gem(i, j, checker(i, j));
+                }
+            }
+            // Plant a horizontal run of 3 Circles on row 0 + a Circle directly below
+            // the break cell, and a Square to cap the row so it stays a 4 (not 5).
+            board.set_gem(0, 0, GemKind::Circle);
+            board.set_gem(0, 1, GemKind::Circle);
+            board.set_gem(0, 2, GemKind::Circle);
+            board.set_gem(0, 3, GemKind::Triangle); // break cell
+            board.set_gem(0, 4, GemKind::Square);   // cap -> keeps run at 4
+            board.set_gem(1, 3, GemKind::Circle);   // swap source (completes the run)
+
+            let outcome = board.try_swap(0, 3, 1, 3);
+
+            if !matches!(outcome, MoveOutcome::Success { .. }) {
+                continue;
+            }
+
+            let has_horizontal_bolt = board
+                .gems
+                .iter()
+                .flatten()
+                .any(|g| matches!(g.special, Some(SpecialGem::Bolt { horizontal: true })));
+            if has_horizontal_bolt {
+                surviving_seed = Some(seed);
+                break;
+            }
+        }
+
+        assert!(
+            surviving_seed.is_some(),
+            "for some seed a 4-in-a-row must leave a horizontal Bolt special gem on the board"
+        );
+    }
 }

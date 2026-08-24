@@ -404,3 +404,68 @@ const BOUNCE_ANIM_DURATION: float = 0.1
 - Load real .ron level packs via bewildered-content
 - Build Godot Control HUD (score, moves, objective)
 - Play full campaign levels
+### Stage 6 — Content & Level HUD ✅ COMPLETE
+
+**Date**: 2026-08-24
+
+**Summary**:
+- Copied the 8 campaign `.ron` level packs (`campaign-001..008`) + `manifest.ron` into a root
+  `levels/` directory (sourced from `rust/crates/bewildered-content/assets/campaign/`).
+- Extended `BoardSim` to load real level definitions and track **authoritative objective progress**.
+- Added Godot level HUD (`scenes/hud.tscn` + `scripts/hud.gd`) and victory/defeat modals
+  (`scenes/level_complete_dialog.tscn`).
+- Verified level 1 loads and plays start-to-finish via MCP screenshots and runtime introspection.
+
+**Rust FFI — level loading & objective tracking** (`rust/crates/bewildered-godot/src/lib.rs`):
+- `load_level_file(path)` (OS path; Godot globalizes `res://`) and `load_level_from_ron(content)`.
+- Parses `bewildered-content::Level` → builds `Board` with the level's grid, gem types, seed
+  override, and strips starting gems at blocker positions.
+- Objective variants wired: **ScoreTarget** (score += `calculate_score`), **Collection**
+  (target-gem clears counted), **Descent** (blocker chips), **Survival** (survive N moves / fail on
+  board lock).
+- Replaced the Stage-1 hardcoded `objective_progress(combo, 10000)` with real criteria.
+- Getters added: `get_moves_remaining() -> i32`, `get_target_score() -> i64`,
+  `get_objective_progress() -> i64`, `get_score() -> i64`,
+  `get_objective_description() -> String`, `is_level_cleared() -> bool`,
+  `is_level_failed() -> bool`, plus `get_level_id()` / `get_level_title()` / `get_last_error()`.
+
+**Core addition** (`rust/crates/bewildered-core/src/lib.rs`):
+- Added `Board::cleared_this_move: Vec<(usize, usize, GemKind)>` — records each gem cleared per
+  move (position + kind captured at clear-time, since the board refills). Powers authoritative
+  **Collection** counting and **Descent** blocker progress.
+- Special gems now persist to the board (from the Gate-2 fix) so they report via `get_cell().special`.
+
+**Godot — HUD & modals:**
+- `scenes/hud.tscn` + `scripts/hud.gd`: CanvasLayer/Control HUD with chamber title,
+  objective description, objective progress bar + `current/target` label, moves remaining,
+  score, and resonance multiplier badge. Polls the sim every frame and owns the modals.
+- `scenes/level_complete_dialog.tscn` + `scripts/level_complete_dialog.gd`: dim overlay + centered
+  panel. Victory state ("Chamber Cleared" / "Next Chamber") and failed state
+  ("Chamber Failed" / "Retry"). Routes via `next_chamber_pressed` / `retry_pressed` signals.
+- `scripts/board.gd`: `current_level_index`, `_load_level`, `load_next_level`, `retry_level`,
+  `get_board_sim()`, and `level_cleared`/`level_failed` signals emitted once per level from
+  `_process`. Gem-instance array reset + resize on every (re)load.
+- `scenes/main.tscn`: instantiates `hud.tscn` wired to the Board.
+
+**Verification:**
+- `cargo build` clean; `cargo test --workspace` → **10 tests pass** (4 content incl. new
+  `load_all_campaign_levels`, 5 roundtrip, 1 core Bolt-persistence).
+- Runtime (MCP screenshots + `game_eval`): level 1 "First Steps" loads — HUD shows "First Steps",
+  "Score 5000 points — 20 moves", `Moves: 20`, `Score: 0`, `0 / 5000`. A valid swap scored 656
+  points, moved 20→19, and updated the objective bar. `retry_level()` resets to campaign-001
+  (moves 20, score 0); `load_next_level()` loads campaign-002 "Gem Collector" (Collection,
+  target 30). Victory and failed modals both render and label their buttons correctly.
+- `COORD SELF-TEST: ALL PASSED` (9/9); no warnings/errors in the final run.
+
+**Key Files Created/Modified**:
+- `levels/` (campaign-001..008.ron + manifest.ron)
+- `rust/crates/bewildered-godot/src/lib.rs`, `rust/crates/bewildered-godot/Cargo.toml`
+- `rust/crates/bewildered-core/src/lib.rs`, `rust/crates/bewildered-content/src/lib.rs`
+- `scenes/hud.tscn`, `scripts/hud.gd`, `scenes/level_complete_dialog.tscn`,
+  `scripts/level_complete_dialog.gd`
+- `scenes/main.tscn`, `scripts/board.gd`
+
+**Next Stage**: Stage 7 — Descent Mode & Relic Selection
+- Load a whole campaign pack, sequential chambers, and the relic-choice between chambers.
+- Wire relic `RelicEffect` → `RuleModifiers` through the run.
+- Daily Descent seeding (date-hashed seed).

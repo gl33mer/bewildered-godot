@@ -1,0 +1,10 @@
+Level(
+  id: "campaign-005",
+  name: "High Score Chase",
+  grid: GridSize(width: 8, height: 8),
+  gem_types: ["circle", "triangle", "square", "diamond", "star"],
+  blockers: [],
+  objective: ScoreTarget(points: 8000, max_moves: 18),
+  relic_pool_tags: ["descent-early"],
+  seed_override: Some(5),
+)

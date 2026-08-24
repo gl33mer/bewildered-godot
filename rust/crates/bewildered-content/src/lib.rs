@@ -603,4 +603,25 @@ mod tests {
         let result = validate_level(&level);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn load_all_campaign_levels() {
+        // Every campaign level shipped in the root `levels/` dir (sourced from
+        // this crate's assets/campaign) must parse — covering 4–6 gem types,
+        // blockers, and all four objective variants used by Stage 6.
+        for i in 1..=8 {
+            let id = format!("campaign-{:03}", i);
+            let path = format!("assets/campaign/{}.ron", id);
+            let level = Level::load_ron(&path)
+                .unwrap_or_else(|e| panic!("{} failed to parse: {}", id, e));
+            assert!(!level.name.is_empty(), "{} missing name", id);
+            assert_eq!(level.grid.width, 8);
+            assert_eq!(level.grid.height, 8);
+            assert!(
+                !level.gem_types.is_empty(),
+                "{} missing gem_types",
+                id
+            );
+        }
+    }
 }

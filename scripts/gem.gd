@@ -20,9 +20,11 @@ func _ready() -> void:
 	special_overlay.add_theme_font_size_override("font_size", int(cell_size * 0.45))
 	special_overlay.visible = false
 	special_overlay.z_index = 10
-	special_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	special_overlay.set_anchors_preset(Control.PRESET_CENTER)
+	special_overlay.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	special_overlay.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	special_overlay.position = Vector2(-cell_size * 0.5, -cell_size * 0.5)
-	special_overlay.size = Vector2(cell_size, cell_size)
+	special_overlay.custom_minimum_size = Vector2(cell_size, cell_size)
 	add_child(special_overlay)
 
 func set_gem(kind: int, echo: bool, special: int = 0) -> void:

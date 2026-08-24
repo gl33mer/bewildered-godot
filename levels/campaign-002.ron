@@ -1,0 +1,10 @@
+Level(
+  id: "campaign-002",
+  name: "Gem Collector",
+  grid: GridSize(width: 8, height: 8),
+  gem_types: ["circle", "triangle", "square", "diamond", "star"],
+  blockers: [],
+  objective: Collection(target_gem: "circle", count: 30),
+  relic_pool_tags: ["descent-early"],
+  seed_override: Some(2),
+)

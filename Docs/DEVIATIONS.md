@@ -246,7 +246,52 @@ This file tracks any deviations from the original specifications in `Docs/` that
 
 ### Stage 6: Content & Level HUD
 
-*Pending — to be filled during Stage 6*
+**Deviation 1**: Blockers in Descent levels are implemented as a lightweight BoardSim overlay
+(chip hits at cleared cells) rather than as persistent in-core obstacles.
+
+**Reason**: `bewildered-core::Board` models blockers only as removed gems (`remove_gem`), which the
+first gravity/refill then refill with normal gems; the core has no persistent blocker tile type.
+Rather than rewrite the core Board, Stage 6 tracks a level's blockers in `BoardSim`
+(`blocker_hits: HashMap<(row,col), hits>`): a match clearing a gem at a blocker's starting cell
+chips its hits, and when hits reach zero the blocker is counted cleared. This makes
+Score/Collection/Survival fully faithful and gives Descent a working objective, documented here so
+Stage 7+ can decide whether to promote blockers into the core.
+
+**Files Affected**: `rust/crates/bewildered-godot/src/lib.rs` (`setup_level`, `try_swap`)
+
+**Spec References**: 05-LEVEL-FORMAT-AUTHORING.md (blockers), 03-GAME-DESIGN.md §Objectives (Descent)
+
+**Deviation 2**: Collection and Descent levels use a default 20-move budget instead of an
+objective-specified move count.
+
+**Reason**: The `Objective::Collection` and `Objective::Descent` variants carry no `max_moves` field,
+so there is no data-mandated limit. A 20-move default (matching the original solver's default)
+gives these objectives a concrete fail condition (out of moves).
+
+**Files Affected**: `rust/crates/bewildered-godot/src/lib.rs` (`setup_level`)
+
+**Spec References**: 05-LEVEL-FORMAT-AUTHORING.md (Collection/Descent don't specify max_moves)
+
+**Deviation 3**: HUD built as a dedicated `scenes/hud.tscn` + `scripts/hud.gd` (CanvasLayer) rather
+than a single code-built debug panel.
+
+**Reason**: Stage 6 introduced a shipped (non-debug) HUD as its own reusable scene, per the task
+spec. The Stage 3 debug HUD remains a separate code-built panel in `scripts/board.gd`; the two are
+deliberately independent so the debug aid can be removed without touching the shipped HUD.
+
+**Files Affected**: `scenes/hud.tscn`, `scripts/hud.gd`, `scenes/main.tscn`
+
+**Spec References**: MIGRATION Stage 6 (Content & Level HUD)
+
+**Deviation 4**: `Board::cleared_this_move` records gems only for a successful (`Success`) move
+(reset at the start of `try_swap`).
+
+**Reason**: Illegal/NoMatch swaps mutate nothing and revert, so recording cleared gems only for
+successful moves keeps objective accounting accurate and side-effect-free.
+
+**Files Affected**: `rust/crates/bewildered-core/src/lib.rs`
+
+**Spec References**: 03-GAME-DESIGN.md §Scoring / objectives
 
 ---
 

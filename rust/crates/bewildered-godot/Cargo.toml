@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 godot = { version = "0.2", features = ["experimental-threads"] }
 bewildered-core = { path = "../bewildered-core" }
 bewildered-content = { path = "../bewildered-content" }
+ron = "0.8"

@@ -1,0 +1,14 @@
+Level(
+  id: "campaign-003",
+  name: "Ice Breaker",
+  grid: GridSize(width: 8, height: 8),
+  gem_types: ["circle", "triangle", "square", "diamond"],
+  blockers: [
+    Blocker(pos: (3, 3), kind: Ice(hits: 2)),
+    Blocker(pos: (4, 4), kind: Ice(hits: 1)),
+    Blocker(pos: (2, 5), kind: Crate(hits: 1)),
+  ],
+  objective: Descent(blockers_to_clear: 3),
+  relic_pool_tags: ["descent-early"],
+  seed_override: Some(3),
+)
