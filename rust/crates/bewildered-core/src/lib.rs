@@ -218,16 +218,37 @@ impl Board {
         rule_modifiers: RuleModifiers,
     ) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
-        let mut gems = vec![None; width * height];
+        let gt: Vec<GemKind> = gem_types.clone();
+        let mut gems: Vec<Option<Gem>> = Vec::with_capacity(width * height);
 
-        // Fill with random gems
-        for gem in &mut gems {
-            let kind_idx = rng.gen_range(0..gem_types.len());
-            *gem = Some(Gem {
-                kind: gem_types[kind_idx],
+        // Fill with random gems, guaranteeing the board starts match-free. Each
+        // gem is rejected if it would complete a 3-in-a-row with the two gems
+        // already placed directly to its left or directly above it. This keeps
+        // the opening board free of pre-existing matches (and thus prevents an
+        // unrelated swap from being accepted merely because a pre-existing match
+        // exists elsewhere on the board).
+        for i in 0..(width * height) {
+            let r = i / width;
+            let c = i % width;
+            let mut kind = gt[rng.gen_range(0..gt.len())];
+            for _ in 0..20 {
+                let candidate = gt[rng.gen_range(0..gt.len())];
+                let horiz = c >= 2
+                    && gems[i - 1].as_ref().map(|g| g.kind) == Some(candidate)
+                    && gems[i - 2].as_ref().map(|g| g.kind) == Some(candidate);
+                let vert = r >= 2
+                    && gems[i - width].as_ref().map(|g| g.kind) == Some(candidate)
+                    && gems[i - 2 * width].as_ref().map(|g| g.kind) == Some(candidate);
+                if !horiz && !vert {
+                    kind = candidate;
+                    break;
+                }
+            }
+            gems.push(Some(Gem {
+                kind,
                 echo: None,
                 special: None,
-            });
+            }));
         }
 
         Self {
@@ -316,10 +337,24 @@ impl Board {
         // Check for matches
         let initial_matches = self.find_all_matches();
 
-        if initial_matches.is_empty() {
-            // No matches — revert swap
+        // A swap is only legal if at least one resulting match involves one of
+        // the two swapped cells (or a special gem was created by the swap). This
+        // stops an unrelated swap from being accepted merely because a
+        // pre-existing match exists somewhere else on the board.
+        let swap_caused = initial_matches.iter().any(|m| {
+            m.cells.contains(&(row1, col1))
+                || m.cells.contains(&(row2, col2))
+                || (m.is_special && m.special_type.is_some())
+        });
+
+        if initial_matches.is_empty() || !swap_caused {
+            // No match was actually produced by THIS swap — revert it.
             self.gems.swap(idx1, idx2);
-            return MoveOutcome::Illegal;
+            return if initial_matches.is_empty() {
+                MoveOutcome::Illegal
+            } else {
+                MoveOutcome::NoMatch
+            };
         }
 
         // Reset resonance for this move
@@ -908,5 +943,75 @@ mod tests {
             surviving_seed.is_some(),
             "for some seed a 4-in-a-row must leave a horizontal Bolt special gem on the board"
         );
+    }
+
+    /// The starting board must be free of pre-existing matches so that an
+    /// unrelated swap is never accepted just because a match pre-exists on the
+    /// board. (Uses the game's real 4-6 color pools, which are match-free-able;
+    /// 2-color grids cannot be match-free on an 8x8.)
+    #[test]
+    fn new_board_is_match_free() {
+        let four = vec![
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+        ];
+        let five = vec![
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+            GemKind::Star,
+        ];
+        let six = vec![
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+            GemKind::Star,
+            GemKind::Cross,
+        ];
+        for seed in 0..200u64 {
+            for gt in [four.clone(), five.clone(), six.clone()] {
+                let board = Board::new(8, 8, seed, gt);
+                assert!(
+                    board.find_all_matches().is_empty(),
+                    "seed {} produced a pre-existing match",
+                    seed
+                );
+            }
+        }
+    }
+
+    /// An adjacent swap that does NOT create a match must be rejected (and the
+    /// board reverted), even on a board that might otherwise contain matches.
+    #[test]
+    fn unrelated_swap_is_rejected() {
+        for seed in 0..300u64 {
+            let mut board = Board::new(8, 8, seed, vec![
+                GemKind::Circle,
+                GemKind::Triangle,
+                GemKind::Square,
+                GemKind::Diamond,
+            ]);
+            for r in 0..board.height {
+                for c in 0..board.width {
+                    if c + 1 < board.width && !board.would_match(r, c, r, c + 1) {
+                        let before = board.gems.clone();
+                        let outcome = board.try_swap(r, c, r, c + 1);
+                        assert!(
+                            matches!(outcome, MoveOutcome::Illegal | MoveOutcome::NoMatch),
+                            "seed {} pair ({r},{c})->({r},{}) should be rejected",
+                            seed,
+                            c + 1
+                        );
+                        assert_eq!(board.gems, before, "board must be reverted on illegal swap");
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("no non-matching adjacent pair found across seeds");
     }
 }
