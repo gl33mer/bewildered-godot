@@ -415,6 +415,7 @@ func _animate_rejection_snapback(a: Vector2i, b: Vector2i) -> void:
 	var gem_b = _get_gem_instance(b.x, b.y)
 	if gem_a == null || gem_b == null:
 		is_animating = false
+		is_processing_swap = false
 		return
 	
 	var pos_a = _get_cell_position(a.x, a.y)
@@ -436,8 +437,17 @@ func _animate_rejection_snapback(a: Vector2i, b: Vector2i) -> void:
 	# Add red flash during rejection
 	_rejection_flash([gem_a, gem_b])
 	
+	# Safety timeout to force unlock if tween hangs
+	var safety_timer = get_tree().create_timer(0.5)
+	# Connect timeout to force unlock if tween hangs
+	safety_timer.timeout.connect(_force_unlock_rejection.bind())
 	await tween_a.finished
+	
+	# Ensure clean state after rejection
 	is_animating = false
+	is_processing_swap = false
+	selected_cell = Vector2i(-1, -1)
+	_sync_board_state()
 
 func _process_match_sequence() -> void:
 	# This will be called after swap animation completes
@@ -1069,3 +1079,10 @@ func _spawn_echo_particles(pos: Vector2) -> void:
 	tween.tween_property(flash, "scale", Vector2(2.0, 2.0), 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(flash, "modulate:a", 0.0, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.finished.connect(flash.queue_free.bind())
+
+func _force_unlock_rejection() -> void:
+	if is_animating:
+		is_animating = false
+		is_processing_swap = false
+		selected_cell = Vector2i(-1, -1)
+		_sync_board_state()
