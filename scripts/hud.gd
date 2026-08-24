@@ -21,6 +21,8 @@ var _board_positioned: bool = false
 @onready var moves_label: Label = %MovesLabel
 @onready var score_label: Label = %ScoreLabel
 @onready var multiplier_label: Label = %MultiplierLabel
+@onready var rotate_ccw_button: Button = %RotateCCW
+@onready var rotate_cw_button: Button = %RotateCW
 
 func _ready() -> void:
 	board = get_node(board_path)
@@ -28,6 +30,8 @@ func _ready() -> void:
 	top_bar = get_node_or_null("Root/TopBar")
 	board.level_cleared.connect(_on_level_cleared)
 	board.level_failed.connect(_on_level_failed)
+	rotate_ccw_button.pressed.connect(board.rotate_counter_clockwise)
+	rotate_cw_button.pressed.connect(board.rotate_clockwise)
 	_refresh()
 
 func _process(_delta: float) -> void:
@@ -44,16 +48,20 @@ func _position_board_below_hud() -> void:
 	var view_size := get_viewport().get_visible_rect().size
 	var hud_bottom_screen: float = top_bar.global_position.y + top_bar.size.y
 	var board_px: float = float(board.board_height) * float(board.cell_size) + (float(board.board_height) - 1.0) * float(board.padding)
-	# Scale the board so it fills the space below the HUD (24px gaps top + bottom,
-	# 24px side margins) while never scaling UP. Node scale keeps click mapping
-	# correct because get_local_mouse_position() returns design-unit local coords.
-	var avail_h := view_size.y - hud_bottom_screen - 48.0
+	# Scale the board so it fills the space below the HUD with generous breathing
+	# room: a fixed 40px top plate below the banner (so the top gem row is clearly
+	# clear of the HUD) and 24px bottom/side margins. Never scales UP. Node scale
+	# keeps click mapping correct because get_local_mouse_position() returns
+	# design-unit local coords.
+	var top_gap := 40.0
+	var bottom_gap := 24.0
+	var avail_h := view_size.y - hud_bottom_screen - top_gap - bottom_gap
 	var avail_w := view_size.x - 48.0
 	var fit: float = min(min(1.0, avail_h / board_px), avail_w / board_px)
 	var scaled_px: float = board_px * fit
 	var half_vp_h := view_size.y * 0.5
 	board.scale = Vector2(fit, fit)
-	board.position = Vector2(0.0, hud_bottom_screen - half_vp_h + 24.0 + scaled_px * 0.5)
+	board.position = Vector2(0.0, hud_bottom_screen - half_vp_h + top_gap + scaled_px * 0.5)
 
 func _refresh() -> void:
 	if sim == null:

@@ -9,6 +9,40 @@ use serde::{Deserialize, Serialize};
 pub mod gem_types;
 pub use gem_types::GemKind;
 
+/// The direction gravity pulls gems toward. Down = toward the bottom row,
+/// Right = toward the right column, Up = toward the top row, Left = toward the
+/// left column. Powers the 90° Gravity Tumbler mechanic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Down,
+    Right,
+    Up,
+    Left,
+}
+
+impl Direction {
+    /// Rotate the gravity direction 90° clockwise (matching a clockwise
+    /// physical board tumbling).
+    pub fn rotate_cw(self) -> Direction {
+        match self {
+            Direction::Down => Direction::Left,
+            Direction::Left => Direction::Up,
+            Direction::Up => Direction::Right,
+            Direction::Right => Direction::Down,
+        }
+    }
+
+    /// Rotate the gravity direction 90° counter-clockwise.
+    pub fn rotate_ccw(self) -> Direction {
+        match self {
+            Direction::Down => Direction::Right,
+            Direction::Right => Direction::Up,
+            Direction::Up => Direction::Left,
+            Direction::Left => Direction::Down,
+        }
+    }
+}
+
 /// Rule modifiers from active relics — threaded through core systems.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RuleModifiers {
@@ -160,6 +194,10 @@ pub enum MoveOutcome {
         matches: Vec<Match>,
         cascades: usize,
         resonance_multiplier: f32,
+        /// Per-cascade-depth cleared cell lists (each entry carries the cell's
+        /// kind at clear-time). Lets the Godot layer present each cascade step
+        /// with readable pacing instead of clearing everything in one frame.
+        clears_by_depth: Vec<Vec<(usize, usize, GemKind)>>,
     },
     /// The swap was illegal (no match would be created) — reverts the swap.
     Illegal,
@@ -201,6 +239,8 @@ pub struct Board {
     /// move — captured at clear-time (the board refills, so kinds are otherwise
     /// lost). Used for authoritative objective tracking.
     pub cleared_this_move: Vec<(usize, usize, GemKind)>,
+    /// Current gravity pull direction (defaults to Down).
+    pub gravity: Direction,
 }
 
 impl Board {
@@ -262,6 +302,7 @@ impl Board {
             resonance_stack: 0,
             rule_modifiers,
             cleared_this_move: Vec::new(),
+            gravity: Direction::Down,
         }
     }
 
@@ -363,7 +404,8 @@ impl Board {
         self.cleared_this_move.clear();
 
         // Process matches and cascades with echo detonation
-        let total_cascades = self.process_matches(initial_matches.clone());
+        let (total_cascades, clears_by_depth) =
+            self.process_matches(initial_matches.clone());
 
         let resonance_mult = self.resonance_multiplier;
 
@@ -371,6 +413,7 @@ impl Board {
             matches: initial_matches,
             cascades: total_cascades,
             resonance_multiplier: resonance_mult,
+            clears_by_depth,
         }
     }
 
@@ -531,10 +574,14 @@ impl Board {
     }
 
     /// Process matches: clear gems, apply gravity, refill, repeat until no matches.
-    /// Returns total cascade count.
-    fn process_matches(&mut self, initial_matches: Vec<Match>) -> usize {
+    /// Returns (total cascade count, per-depth cleared cell list-with-kind).
+    fn process_matches(
+        &mut self,
+        initial_matches: Vec<Match>,
+    ) -> (usize, Vec<Vec<(usize, usize, GemKind)>>) {
         let mut total_cascades = 0;
         let mut current_matches = initial_matches;
+        let mut clears_by_depth: Vec<Vec<(usize, usize, GemKind)>> = Vec::new();
 
         loop {
             if current_matches.is_empty() {
@@ -606,6 +653,7 @@ impl Board {
             }
 
             // Clear matched cells and create echoes (for non-detonated cells)
+            let mut round_clears: Vec<(usize, usize, GemKind)> = Vec::new();
             let echo_duration = self.rule_modifiers.echo_duration();
             for m in &current_matches {
                 for &(r, c) in &m.cells {
@@ -617,6 +665,7 @@ impl Board {
                         }
                         self.remove_gem(r, c);
                         self.cleared_this_move.push((r, c, kind));
+                        round_clears.push((r, c, kind));
                     }
                 }
             }
@@ -625,6 +674,7 @@ impl Board {
             for (r, c) in extra_clear_cells {
                 if let Some(kind) = self.gem(r, c).map(|g| g.kind) {
                     self.cleared_this_move.push((r, c, kind));
+                    round_clears.push((r, c, kind));
                     self.remove_gem(r, c);
                 }
             }
@@ -634,12 +684,15 @@ impl Board {
                 for i in 0..self.gems.len() {
                     let is_nova_kind = Self::gem_kind_at(&self.gems, i) == Some(color);
                     if is_nova_kind {
-                        self.cleared_this_move
-                            .push((i / self.width, i % self.width, color));
+                        let (nr, nc) = (i / self.width, i % self.width);
+                        self.cleared_this_move.push((nr, nc, color));
+                        round_clears.push((nr, nc, color));
                         self.gems[i] = None;
                     }
                 }
             }
+
+            clears_by_depth.push(round_clears);
 
             // Persist special gems created by this cascade step: place the
             // special gem at the center of its matching run so it persists on
@@ -657,38 +710,122 @@ impl Board {
                 }
             }
 
-            // Apply gravity
-            self.apply_gravity();
+            // Apply gravity toward the current gravity wall
+            self.apply_gravity_dir(self.gravity);
 
-            // Refill from top (echoes carry over to new gems)
+            // Refill from the upstream wall (echoes carry over to new gems)
             self.refill();
 
             // Check for new matches (cascade)
             current_matches = self.find_all_matches();
         }
 
-        total_cascades
+        (total_cascades, clears_by_depth)
     }
 
-    /// Apply gravity: gems fall down to fill empty spaces.
-    fn apply_gravity(&mut self) {
+    /// The public gravity resolver: compacts gems toward the given wall, then
+    /// refills the resulting empty (upstream) boundary cells with random gems.
+    pub fn resolve_gravity(&mut self, dir: Direction) {
+        self.apply_gravity_dir(dir);
+        self.refill();
+    }
+
+    /// Rotate gravity 90° (clockwise or counter-clockwise) and resolve the
+    /// resulting tumbling cascades as a move. Always succeeds and costs a move.
+    pub fn rotate_gravity(&mut self, clockwise: bool) -> MoveOutcome {
+        self.gravity = if clockwise {
+            self.gravity.rotate_cw()
+        } else {
+            self.gravity.rotate_ccw()
+        };
+
+        self.combo = 0;
+        self.resonance_multiplier = 1.0;
+        self.resonance_stack = 0;
+        self.cleared_this_move.clear();
+
+        // Tumble: pull every gem toward the new wall, refill the emptied side.
+        self.resolve_gravity(self.gravity);
+
+        let initial_matches = self.find_all_matches();
+        let (total_cascades, clears_by_depth) = self.process_matches(initial_matches.clone());
+
+        MoveOutcome::Success {
+            matches: initial_matches,
+            cascades: total_cascades,
+            resonance_multiplier: self.resonance_multiplier,
+            clears_by_depth,
+        }
+    }
+
+    /// Apply gravity: compact gems toward the given wall direction.
+    fn apply_gravity_dir(&mut self, dir: Direction) {
+        match dir {
+            Direction::Down | Direction::Up => self.apply_gravity_vertical(dir),
+            Direction::Right | Direction::Left => self.apply_gravity_horizontal(dir),
+        }
+    }
+
+    /// Compact gems within each column toward the top (Up) or bottom (Down).
+    fn apply_gravity_vertical(&mut self, dir: Direction) {
         for col in 0..self.width {
-            let mut write_row = self.height - 1;
-            for read_row in (0..self.height).rev() {
+            let mut write_row = if dir == Direction::Down {
+                self.height - 1
+            } else {
+                0
+            };
+            let row_iter: Vec<usize> = if dir == Direction::Down {
+                (0..self.height).rev().collect()
+            } else {
+                (0..self.height).collect()
+            };
+            for read_row in row_iter {
                 let read_idx = self.idx(read_row, col);
                 if self.gems[read_idx].is_some() {
                     if read_row != write_row {
                         let write_idx = self.idx(write_row, col);
-                        let gem = self.gems[read_idx].take();
-                        self.gems[write_idx] = gem;
+                        self.gems[write_idx] = self.gems[read_idx].take();
                     }
-                    write_row = write_row.saturating_sub(1);
+                    if dir == Direction::Down {
+                        if write_row > 0 {
+                            write_row -= 1;
+                        }
+                    } else {
+                        write_row += 1;
+                    }
                 }
             }
-            // Fill remaining with None
-            for row in (0..=write_row).rev() {
-                let idx = self.idx(row, col);
-                self.gems[idx] = None;
+        }
+    }
+
+    /// Compact gems within each row toward the left (Left) or right (Right).
+    fn apply_gravity_horizontal(&mut self, dir: Direction) {
+        for row in 0..self.height {
+            let mut write_col = if dir == Direction::Right {
+                self.width - 1
+            } else {
+                0
+            };
+            let col_iter: Vec<usize> = if dir == Direction::Right {
+                (0..self.width).rev().collect()
+            } else {
+                (0..self.width).collect()
+            };
+            for read_col in col_iter {
+                let read_idx = self.idx(row, read_col);
+                if self.gems[read_idx].is_some() {
+                    if read_col != write_col {
+                        let write_idx = self.idx(row, write_col);
+                        self.gems[write_idx] = self.gems[read_idx].take();
+                    }
+                    if dir == Direction::Right {
+                        if write_col > 0 {
+                            write_col -= 1;
+                        }
+                    } else {
+                        write_col += 1;
+                    }
+                }
             }
         }
     }
@@ -846,6 +983,7 @@ pub fn calculate_score(outcome: &MoveOutcome, combo: usize, rule_modifiers: &Rul
         matches,
         cascades,
         resonance_multiplier,
+        ..
     } = outcome
     else {
         return 0;
@@ -1013,5 +1151,60 @@ mod tests {
             }
         }
         panic!("no non-matching adjacent pair found across seeds");
+    }
+
+    #[test]
+    fn direction_rotation_cycles() {
+        assert_eq!(Direction::Down.rotate_cw(), Direction::Left);
+        assert_eq!(Direction::Left.rotate_cw(), Direction::Up);
+        assert_eq!(Direction::Up.rotate_cw(), Direction::Right);
+        assert_eq!(Direction::Right.rotate_cw(), Direction::Down);
+        assert_eq!(Direction::Down.rotate_ccw(), Direction::Right);
+        assert_eq!(Direction::Right.rotate_ccw(), Direction::Up);
+        assert_eq!(Direction::Up.rotate_ccw(), Direction::Left);
+        assert_eq!(Direction::Left.rotate_ccw(), Direction::Down);
+    }
+
+    #[test]
+    fn rotate_gravity_succeeds_and_changes_direction() {
+        let mut board = Board::new(8, 8, 12345, vec![
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+        ]);
+        assert_eq!(board.gravity, Direction::Down);
+        assert!(matches!(
+            board.rotate_gravity(true),
+            MoveOutcome::Success { .. }
+        ));
+        assert_eq!(board.gravity, Direction::Left);
+        assert!(matches!(
+            board.rotate_gravity(false),
+            MoveOutcome::Success { .. }
+        ));
+        assert_eq!(board.gravity, Direction::Down);
+    }
+
+    #[test]
+    fn rotate_gravity_keeps_board_full() {
+        // Four clockwise rotations return gravity to Down; each opponent rotation
+        // is a valid move (Success) and refills the board so no cell is empty.
+        let mut board = Board::new(8, 8, 42, vec![
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+        ]);
+        for _ in 0..4 {
+            assert!(matches!(
+                board.rotate_gravity(true),
+                MoveOutcome::Success { .. }
+            ));
+            for (i, g) in board.gems.iter().enumerate() {
+                assert!(g.is_some(), "board not full after rotation at idx {}", i);
+            }
+        }
+        assert_eq!(board.gravity, Direction::Down);
     }
 }

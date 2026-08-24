@@ -397,3 +397,33 @@ special gem was created by the swap).
 
 Note: the HUD-overlap item in this review was already resolved in the prior QA pass (`scripts/hud.gd`
 places the board 24px below the bar and scales it to fit); it was re-verified rather than re-fixed.
+
+### Stage 6.5: Human Pacing, Special FX, 40px HUD margin & the 2D Gravity Tumbler
+
+**What changed**:
+- **Step-by-step cascade pacing**: `MoveOutcome::Success` now carries a new
+  `clears_by_depth` field (per-cascade-depth cleared cells + their kinds at
+  clear-time). The FFI emits one `match_resolved` per depth; `board.gd` presents
+  each depth as: (1) any special-elimination FX, (2) shrink/fade that depth's
+  gems + a pitch-escalating chime (0.15s), (3) a 0.10s pause — then one gravity
+  slide (0.18s) + spawn before the authoritative `refresh_board()`.
+- **Special-elimination FX (before clearing)**: Bolt → bright row/column beams;
+  Prism → rainbow shimmer over all gems of the matched color; Nova → expanding
+  orange/red blast ring. Driven from `_play_special_activations` in board.gd.
+- **HUD clearance**: `hud.gd` now keeps a fixed 40px plate below the banner
+  (previously 24px); board still auto-scales to a full 8×8 fit.
+- **2D Gravity Tumbler**: new `Direction` enum (Down/Right/Up/Left) + persistent
+  `Board::gravity`. `resolve_gravity(dir)` compacts toward any wall + refills;
+  `rotate_gravity(±90°)` tweaks direction, resolves the falling cascade, and
+  decrements a move (always a Success). FFI `BoardSim::rotate_gravity(bool)`.
+  Godot: `E`/`Q` keys + "⟳"/"⟲" HUD buttons rotate the board container 90°
+  (TRANS_QUAD tween) and run the resolved cascades.
+
+**Presentation-fidelity note (kept consistent with prior cascade design)**: the
+Rust sim resolves every cascade depth to the final board in one trap; Godot
+re-syncs authoritatively via `refresh_board()` after presenting the clears. The
+per-cascade gravity slide in Godot is a single generic downward compact (not a
+per-direction visual replay), so an intermediate fall during a rotation-triggered
+cascade is approximate — the final board always snaps to the correct wall. This is
+the same tradeoff already documented for the Stage-6 cascade rewrite and keeps the
+presentation decoupled (Rust owns rules, Godot owns looks).

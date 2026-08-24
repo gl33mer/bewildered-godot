@@ -190,157 +190,192 @@ impl BoardSim {
                 );
                 false
             }
-            MoveOutcome::Success { matches, .. } => {
-                // --- Authoritative objective accounting (Stage 6) ---
-                if !self.cleared && !self.failed {
-                    self.moves_used += 1;
-
-                    let gained = {
-                        let b = self.board.as_ref().unwrap();
-                        calculate_score(&outcome, b.combo, &b.rule_modifiers) as i64
-                    };
-                    self.score += gained;
-
-                    // Collection: count target-gem clears across all cascades.
-                    let collection_tg = match &self.level {
-                        Some(l) => match &l.objective {
-                            Objective::Collection { target_gem, .. } => Some(*target_gem),
-                            _ => None,
-                        },
-                        None => None,
-                    };
-                    if let Some(tg) = collection_tg {
-                        let cleared = self
-                            .board
-                            .as_ref()
-                            .map(|b| b.cleared_this_move.clone())
-                            .unwrap_or_default();
-                        for &(_r, _c, kind) in &cleared {
-                            if kind == tg {
-                                self.collected += 1;
-                            }
-                        }
-                    }
-
-                    // Descent: chip blocker hits at cleared cells.
-                    if self.blocker_target > 0 {
-                        let cleared = self
-                            .board
-                            .as_ref()
-                            .map(|b| b.cleared_this_move.clone())
-                            .unwrap_or_default();
-                        for &(r, c, _kind) in &cleared {
-                            if let Some(hits) = self.blocker_hits.get_mut(&(r, c)) {
-                                *hits -= 1;
-                                if *hits <= 0 {
-                                    self.blocker_hits.remove(&(r, c));
-                                    self.blockers_remaining =
-                                        self.blockers_remaining.saturating_sub(1);
-                                }
-                            }
-                        }
-                    }
-
-                    self.update_level_state();
-                }
-
-                // --- Emit cascade signals for Godot presentation ---
-                // Build all signal payloads inside a scoped block so the
-                // immutable board borrow ends before we emit (which needs &mut).
-                let (match_signals, special_signals, echo_charged_signals, echo_detonated_cells, has_echo_detonation, resonance_mult) = {
-                    let board_ref = self.board.as_ref().unwrap();
-                    let mut match_signals = Vec::new();
-                    let mut special_signals = Vec::new();
-                    let mut echo_charged_signals = Vec::new();
-                    let mut echo_detonated_cells = Array::new();
-                    let mut has_echo_detonation = false;
-                    let mut resonance_mult = 1.0f32;
-
-                    for (cascade_idx, m) in matches.iter().enumerate() {
-                        let mut cleared_cells = Array::new();
-                        for &(row, col) in &m.cells {
-                            cleared_cells.push(Vector2i::new(col as i32, row as i32));
-                        }
-                        match_signals.push((cleared_cells, m.kind as i32, cascade_idx as i32 + 1));
-
-                        if m.is_special {
-                            if let Some(special) = m.special_type {
-                                let special_kind = match special {
-                                    SpecialGem::Bolt { .. } => 0,
-                                    SpecialGem::Prism => 1,
-                                    SpecialGem::Nova => 2,
-                                };
-                                let center_idx = m.cells.len() / 2;
-                                let (center_row, center_col) = m.cells[center_idx];
-                                special_signals.push((
-                                    Vector2i::new(center_col as i32, center_row as i32),
-                                    special_kind,
-                                ));
-                            }
-                        }
-
-                        let mut echo_cells = Array::new();
-                        for &(row, col) in &m.cells {
-                            if let Some(gem) = board_ref.gem(row, col) {
-                                if gem.echo.is_some() {
-                                    echo_cells.push(Vector2i::new(col as i32, row as i32));
-                                    echo_detonated_cells
-                                        .push(Vector2i::new(col as i32, row as i32));
-                                    has_echo_detonation = true;
-                                }
-                            }
-                        }
-                        if !echo_cells.is_empty() {
-                            echo_charged_signals.push(echo_cells);
-                        }
-                    }
-
-                    if has_echo_detonation {
-                        resonance_mult = board_ref.resonance_multiplier;
-                    }
-
-                    (
-                        match_signals,
-                        special_signals,
-                        echo_charged_signals,
-                        echo_detonated_cells,
-                        has_echo_detonation,
-                        resonance_mult,
-                    )
-                };
-
-                for (cells, kind, cascade) in match_signals {
-                    self.base_mut().emit_signal(
-                        "match_resolved",
-                        &[cells.to_variant(), kind.to_variant(), cascade.to_variant()],
-                    );
-                }
-                for (pos, kind) in special_signals {
-                    self.base_mut().emit_signal(
-                        "special_gem_created",
-                        &[pos.to_variant(), kind.to_variant()],
-                    );
-                }
-                for cells in echo_charged_signals {
-                    self.base_mut().emit_signal("echo_charged", &[cells.to_variant()]);
-                }
-                if has_echo_detonation && !echo_detonated_cells.is_empty() {
-                    self.base_mut().emit_signal(
-                        "echo_detonated",
-                        &[echo_detonated_cells.to_variant(), resonance_mult.to_variant()],
-                    );
-                }
-
-                // Real objective progress, not a placeholder.
-                let (cur, tgt) = self.objective_progress();
-                self.base_mut().emit_signal(
-                    "objective_progress",
-                    &[cur.to_variant(), tgt.to_variant()],
-                );
-
-                true
-            }
+            MoveOutcome::Success { .. } => self.handle_success_move(&outcome),
         }
+    }
+
+    /// Rotate gravity 90° (clockwise or counter-clockwise). Always succeeds and
+    /// costs a move; the tumbler resolves gravity + cascades in the new
+    /// direction and reports every cascade depth for paced presentation.
+    #[func]
+    fn rotate_gravity(&mut self, clockwise: bool) -> bool {
+        let outcome = {
+            let board = self.board.as_mut().unwrap();
+            board.rotate_gravity(clockwise)
+        };
+
+        match &outcome {
+            MoveOutcome::Success { .. } => self.handle_success_move(&outcome),
+            _ => false,
+        }
+    }
+
+    /// Shared accounting + signal emission for a successful move (swap or
+    /// rotation). Returns true. Mutates objective state and emits the cascade,
+    /// special, echo, and objective signals Godot uses for presentation.
+    fn handle_success_move(&mut self, outcome: &MoveOutcome) -> bool {
+        // --- Authoritative objective accounting (Stage 6) ---
+        if !self.cleared && !self.failed {
+            self.moves_used += 1;
+
+            let gained = {
+                let b = self.board.as_ref().unwrap();
+                calculate_score(outcome, b.combo, &b.rule_modifiers) as i64
+            };
+            self.score += gained;
+
+            // Collection: count target-gem clears across all cascades.
+            let collection_tg = match &self.level {
+                Some(l) => match &l.objective {
+                    Objective::Collection { target_gem, .. } => Some(*target_gem),
+                    _ => None,
+                },
+                None => None,
+            };
+            if let Some(tg) = collection_tg {
+                let cleared = self
+                    .board
+                    .as_ref()
+                    .map(|b| b.cleared_this_move.clone())
+                    .unwrap_or_default();
+                for &(_r, _c, kind) in &cleared {
+                    if kind == tg {
+                        self.collected += 1;
+                    }
+                }
+            }
+
+            // Descent: chip blocker hits at cleared cells.
+            if self.blocker_target > 0 {
+                let cleared = self
+                    .board
+                    .as_ref()
+                    .map(|b| b.cleared_this_move.clone())
+                    .unwrap_or_default();
+                for &(r, c, _kind) in &cleared {
+                    if let Some(hits) = self.blocker_hits.get_mut(&(r, c)) {
+                        *hits -= 1;
+                        if *hits <= 0 {
+                            self.blocker_hits.remove(&(r, c));
+                            self.blockers_remaining =
+                                self.blockers_remaining.saturating_sub(1);
+                        }
+                    }
+                }
+            }
+
+            self.update_level_state();
+        }
+
+        // --- Emit cascade signals for Godot presentation ---
+        let (match_signals, special_signals, echo_charged_signals, echo_detonated_cells, has_echo_detonation, resonance_mult) = {
+            let board_ref = self.board.as_ref().unwrap();
+            let mut match_signals = Vec::new();
+            let mut special_signals = Vec::new();
+            let mut echo_charged_signals = Vec::new();
+            let mut echo_detonated_cells = Array::new();
+            let mut has_echo_detonation = false;
+            let mut resonance_mult = 1.0f32;
+
+            // One match_resolved per cascade depth, so Godot can animate each
+            // pop/fall with readable pacing instead of clearing in one frame.
+            if let MoveOutcome::Success { clears_by_depth, .. } = outcome {
+                for (cascade_idx, depth_cells) in clears_by_depth.iter().enumerate() {
+                    let mut cleared_cells = Array::new();
+                    let mut kind = 0i32;
+                    for &(row, col, gk) in depth_cells {
+                        cleared_cells.push(Vector2i::new(col as i32, row as i32));
+                        kind = gk as i32;
+                    }
+                    if !cleared_cells.is_empty() {
+                        match_signals
+                            .push((cleared_cells, kind, cascade_idx as i32 + 1));
+                    }
+                }
+            }
+
+            // Special gem creation + echo detection over the initial match set.
+            if let MoveOutcome::Success { matches, .. } = outcome {
+                for m in matches {
+                    if m.is_special {
+                        if let Some(special) = m.special_type {
+                            let special_kind = match special {
+                                SpecialGem::Bolt { .. } => 0,
+                                SpecialGem::Prism => 1,
+                                SpecialGem::Nova => 2,
+                            };
+                            let center_idx = m.cells.len() / 2;
+                            let (center_row, center_col) = m.cells[center_idx];
+                            special_signals.push((
+                                Vector2i::new(center_col as i32, center_row as i32),
+                                special_kind,
+                            ));
+                        }
+                    }
+
+                    let mut echo_cells = Array::new();
+                    for &(row, col) in &m.cells {
+                        if let Some(gem) = board_ref.gem(row, col) {
+                            if gem.echo.is_some() {
+                                echo_cells.push(Vector2i::new(col as i32, row as i32));
+                                echo_detonated_cells.push(Vector2i::new(col as i32, row as i32));
+                                has_echo_detonation = true;
+                            }
+                        }
+                    }
+                    if !echo_cells.is_empty() {
+                        echo_charged_signals.push(echo_cells);
+                    }
+                }
+            }
+
+            if has_echo_detonation {
+                resonance_mult = board_ref.resonance_multiplier;
+            }
+
+            (
+                match_signals,
+                special_signals,
+                echo_charged_signals,
+                echo_detonated_cells,
+                has_echo_detonation,
+                resonance_mult,
+            )
+        };
+
+        for (cells, kind, cascade) in match_signals {
+            self.base_mut().emit_signal(
+                "match_resolved",
+                &[cells.to_variant(), kind.to_variant(), cascade.to_variant()],
+            );
+        }
+        for (pos, kind) in special_signals {
+            self.base_mut().emit_signal(
+                "special_gem_created",
+                &[pos.to_variant(), kind.to_variant()],
+            );
+        }
+        for cells in echo_charged_signals {
+            self.base_mut().emit_signal("echo_charged", &[cells.to_variant()]);
+        }
+        if has_echo_detonation && !echo_detonated_cells.is_empty() {
+            self.base_mut().emit_signal(
+                "echo_detonated",
+                &[
+                    echo_detonated_cells.to_variant(),
+                    resonance_mult.to_variant(),
+                ],
+            );
+        }
+
+        // Real objective progress.
+        let (cur, tgt) = self.objective_progress();
+        self.base_mut().emit_signal(
+            "objective_progress",
+            &[cur.to_variant(), tgt.to_variant()],
+        );
+
+        true
     }
 
     fn objective_progress(&self) -> (i64, i64) {

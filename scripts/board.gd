@@ -32,11 +32,20 @@ var animating_gems: Array[Node2D] = []
 # them here and run a single controlled clear/fall/spawn sequence afterwards.
 var _pending_cascade_clears: Array = []
 
+# Accumulated board rotation (radians) — the visual Gravity Tumbler leans the
+# whole board 90° per rotation action while the sim's gravity direction changes.
+var board_rotation: float = 0.0
+
 # Animation timing constants
 const SWAP_ANIM_DURATION: float = 0.12
 const CLEAR_ANIM_DURATION: float = 0.15
 const FALL_ANIM_DURATION: float = 0.18
 const BOUNCE_ANIM_DURATION: float = 0.1
+
+# Gravity Tumbler + cascade pacing constants
+const ROTATE_ANIM_DURATION: float = 0.25
+const ROTATION_QUARTER: float = PI / 2.0
+const CASCADE_STEP_PAUSE: float = 0.1
 
 # Debug HUD nodes
 var debug_panel: Panel
@@ -499,33 +508,48 @@ func _process_match_sequence() -> void:
 	_run_cascade_sequence()
 
 func _run_cascade_sequence() -> void:
-	var all_cells: Array[Vector2i] = []
-	var rep_kind := 0
-	for entry in _pending_cascade_clears:
-		rep_kind = entry["kind"]
-		for cell in entry["cells"]:
-			if not all_cells.has(cell):
-				all_cells.append(cell)
-	if all_cells.is_empty():
+	# Present each cascade depth STEP-BY-STEP so the player can read a multi-
+	# cascade chain instead of all gems vanishing in one frame:
+	#   1) special-elimination FX for any matched specials
+	#   2) shrink/fade that depth's gems + pitch-escalating chime (0.15s)
+	#   3) brief pause (0.10s) registering the new cascade
+	# then a single gravity slide + spawn settle, and a full authoritative sync.
+	if _pending_cascade_clears.is_empty():
 		_settle_board()
 		return
 
-	# 1) Composite clear of every cell cleared across all cascades.
-	var clear_time := _animate_clear(all_cells, rep_kind)
-	if clear_time > 0.0:
-		await get_tree().create_timer(clear_time).timeout
+	for entry in _pending_cascade_clears:
+		var cells: Array[Vector2i] = entry["cells"]
+		var kind: int = entry["kind"]
+		var depth: int = entry["depth"]
+		if cells.is_empty():
+			continue
 
-	# 2) Gravity compact — existing gems slide down into the holes.
+		# 1) Special-elimination FX must play BEFORE the wave clears.
+		var fx_time := _play_special_activations(cells, kind)
+		if fx_time > 0.0:
+			await get_tree().create_timer(fx_time).timeout
+
+		# 2) Shrink/fade these gems + escalating chime (0.15s).
+		audio_manager.play_match(depth)
+		var clear_time := _animate_clear(cells, kind)
+		if clear_time > 0.0:
+			await get_tree().create_timer(clear_time).timeout
+
+		# 3) Let the eye register the newly formed cascade.
+		await get_tree().create_timer(CASCADE_STEP_PAUSE).timeout
+
+	# Gravity slide: existing gems fall into the voids (0.18s).
 	var fall_time := _compact_gravity()
 	if fall_time > 0.0:
 		await get_tree().create_timer(fall_time).timeout
 
-	# 3) Spawn new gems from just above the top row into their destination cells.
+	# Spawn new gems from above and drop them into place (0.18s).
 	var spawn_time := _spawn_new_gems()
 	if spawn_time > 0.0:
 		await get_tree().create_timer(spawn_time).timeout
 
-	# 4) Authoritative sync + unlock.
+	# Authoritative sync + unlock.
 	refresh_board()
 	_update_cursor_highlight()
 	_update_hover_highlight()
@@ -569,6 +593,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Keyboard navigation
 	if event is InputEventKey && event.pressed:
 		match event.keycode:
+			KEY_E:
+				_attempt_rotate(true)
+				return
+			KEY_Q:
+				_attempt_rotate(false)
+				return
 			KEY_UP, KEY_W:
 				cursor_cell.y = max(0, cursor_cell.y - 1)
 				_update_cursor_highlight()
@@ -763,8 +793,10 @@ func _on_match_resolved(cleared_cells: Array[Vector2i], gem_kind: int, cascade_d
 	last_cascade_depth = max(last_cascade_depth, cascade_depth)
 	print("Match resolved: %d cells, kind %d, cascade %d" % [cleared_cells.size(), gem_kind, cascade_depth])
 	
-	# Play match sound with pitch escalation based on cascade depth
-	audio_manager.play_match(cascade_depth)
+	# The chime is NOT played here: all cascade depths arrive synchronously in
+	# one frame, so playing it here would overlap every depth's chime together.
+	# Instead the paced cascade sequence (_run_cascade_sequence) plays it at the
+	# moment each depth's gems pop, escalating the pitch per step.
 	
 	# board_sim emits every cascade depth synchronously in one frame (during
 	# try_swap). We must NOT animate clears here — buffer them so the pipeline
@@ -1164,3 +1196,174 @@ func _force_unlock_rejection() -> void:
 		is_processing_swap = false
 		selected_cell = Vector2i(-1, -1)
 		_sync_board_state()
+
+# --- Gravity Tumbler (90° board rotation) ---
+
+# Public entry points for the on-screen rotate buttons.
+func rotate_clockwise() -> void:
+	_attempt_rotate(true)
+
+func rotate_counter_clockwise() -> void:
+	_attempt_rotate(false)
+
+func _attempt_rotate(clockwise: bool) -> void:
+	if is_processing_swap || is_animating:
+		return
+	is_processing_swap = true
+
+	# board_sim synchronously resolves the tumbling cascade and buffers each
+	# cascade depth's clears into _pending_cascade_clears (same contract as a
+	# swap).
+	_pending_cascade_clears.clear()
+	var result = board_sim.rotate_gravity(clockwise)
+	if not result:
+		is_processing_swap = false
+		is_animating = false
+		return
+
+	total_moves += 1
+	selected_cell = Vector2i(-1, -1)
+	_update_selection_highlight()
+	audio_manager.play_swap()
+	_rotate_board_container(clockwise)
+
+func _rotate_board_container(clockwise: bool) -> void:
+	is_animating = true
+	is_processing_swap = false
+	board_rotation += ROTATION_QUARTER if clockwise else -ROTATION_QUARTER
+
+	# Lean the whole board 90°. The sim has already resolved gravity in the new
+	# direction; the tween is presentational and the cascade/refresh after it
+	# settles the gems into their new wall.
+	var tween := create_tween()
+	tween.tween_property(
+		self, "rotation", board_rotation, ROTATE_ANIM_DURATION
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	await tween.finished
+
+	_process_match_sequence()
+
+# --- Special-gem elimination FX (fired before a computer of that kind clears) ---
+
+# Detect matched specials in a wave and play their signature FX. Returns the
+# max FX duration to await before clearing so the beam/ring visibly plays.
+func _play_special_activations(cells: Array[Vector2i], kind: int) -> float:
+	var bolt_cells: Array[Vector2i] = []
+	var prism_pos: Vector2i = Vector2i(-1, -1)
+	var nova_pos: Vector2i = Vector2i(-1, -1)
+	for cell in cells:
+		var gem = _get_gem_instance(cell.x, cell.y)
+		if gem == null || !is_instance_valid(gem):
+			continue
+		if gem.current_special == 1:
+			bolt_cells.append(cell)
+		elif gem.current_special == 2:
+			prism_pos = cell
+		elif gem.current_special == 3:
+			nova_pos = cell
+
+	var max_t := 0.0
+	if not bolt_cells.is_empty():
+		_spawn_bolt_beam(cells)
+		max_t = max(max_t, 0.22)
+	if prism_pos.x >= 0:
+		_spawn_prism_shimmer(kind)
+		max_t = max(max_t, 0.3)
+	if nova_pos.x >= 0:
+		_spawn_nova_blast(nova_pos)
+		max_t = max(max_t, 0.35)
+	return max_t
+
+func _spawn_bolt_beam(cells: Array[Vector2i]) -> void:
+	# A bright beam across every row & column touched by the cleared Bolt. Each
+	# unique row yields a full-width beam; each unique column a full-height beam.
+	var rows := {}
+	var cols := {}
+	for cell in cells:
+		rows[cell.y] = true
+		cols[cell.x] = true
+	for row in rows:
+		_spawn_row_beam(int(row))
+	for col in cols:
+		_spawn_col_beam(int(col))
+
+func _beam_sprite(w: int, h: int, color: Color) -> Sprite2D:
+	var img := Image.create(int(w), int(h), false, Image.FORMAT_RGBA8)
+	img.fill(color)
+	var sprite := Sprite2D.new()
+	sprite.texture = ImageTexture.create_from_image(img)
+	sprite.z_index = 18
+	add_child(sprite)
+	return sprite
+
+func _spawn_row_beam(row: int) -> void:
+	var board_px_w := int(board_width * cell_size + (board_width - 1) * padding)
+	var beam_h := int(cell_size * 0.85)
+	var beam := _beam_sprite(board_px_w, beam_h, Color(1.0, 1.0, 0.55, 0.95))
+	var center := _get_cell_position(0, row) + Vector2(cell_size / 2.0, cell_size / 2.0)
+	# Horizontal beam spans the board, so its x-center is the board origin x = 0.
+	beam.position = Vector2(0.0, center.y)
+	var tween := create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(beam, "modulate:a", 0.0, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.finished.connect(beam.queue_free.bind())
+
+func _spawn_col_beam(col: int) -> void:
+	var board_px_h := int(board_height * cell_size + (board_height - 1) * padding)
+	var beam_w := int(cell_size * 0.85)
+	var beam := _beam_sprite(beam_w, board_px_h, Color(1.0, 1.0, 0.55, 0.95))
+	var center := _get_cell_position(col, 0) + Vector2(cell_size / 2.0, cell_size / 2.0)
+	beam.position = Vector2(center.x, 0.0)
+	var tween := create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(beam, "modulate:a", 0.0, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.finished.connect(beam.queue_free.bind())
+
+func _spawn_prism_shimmer(kind: int) -> void:
+	# Flash every gem of the matched color through a rainbow cycle, then clear.
+	var rainbow := [
+		Color(1.0, 0.3, 0.3, 1.0),
+		Color(1.0, 0.6, 0.2, 1.0),
+		Color(1.0, 1.0, 0.3, 1.0),
+		Color(0.4, 1.0, 0.4, 1.0),
+		Color(0.3, 0.6, 1.0, 1.0),
+		Color(0.7, 0.3, 1.0, 1.0),
+	]
+	var step := 0.05
+	for gem in gem_instances:
+		if gem == null || !is_instance_valid(gem):
+			continue
+		if gem.current_kind != kind:
+			continue
+		var tween := create_tween()
+		tween.set_parallel(true)
+		for ci in range(rainbow.size()):
+			tween.tween_property(gem, "modulate", rainbow[ci], step).set_trans(Tween.TRANS_LINEAR)
+		tween.tween_property(gem, "modulate", Color(1, 1, 1, 1), step)
+
+func _spawn_nova_blast(pos: Vector2i) -> void:
+	# Expanding orange/red blast ring centered on the Nova.
+	var center := _get_cell_position(pos.x, pos.y) + Vector2(cell_size / 2.0, cell_size / 2.0)
+	var size := int(cell_size * 3)
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var c := Vector2(size / 2.0, size / 2.0)
+	for y in range(size):
+		for x in range(size):
+			var p := Vector2(x, y)
+			var dist := p.distance_to(c)
+			var r0 := size * 0.22
+			var r1 := size * 0.5
+			if dist >= r0 and dist <= r1:
+				var t := (dist - r0) / (r1 - r0)
+				img.set_pixel(x, y, Color(1.0, 0.35 + 0.4 * t, 0.1, 1.0 - t))
+	var ring := Sprite2D.new()
+	ring.texture = ImageTexture.create_from_image(img)
+	ring.position = center
+	ring.z_index = 18
+	add_child(ring)
+	var tween := create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ring, "scale", Vector2(1.6, 1.6), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(ring, "modulate:a", 0.0, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.finished.connect(ring.queue_free.bind())
