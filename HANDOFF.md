@@ -628,3 +628,46 @@ and was re-verified rather than re-applied.
 - `rust/crates/bewildered-core/src/lib.rs` (Blocker, Gem.blocker, gravity, ice-breaking, antipodal charging, RuleModifiers topology field)
 
 **Next**: Phase 3 — GDExtension Multi-Face FFI Bridge (`bewildered-godot`)
+
+### Step 0 Merge + Phase 2 Hardening ✅ COMPLETE
+
+**Date**: 2026-08-25
+**Baseline**: master merged with feature/cube-vertical-loop-exact (a38268e) + origin/master Phases 2–3
+
+**Summary**:
+- Merged `feature/cube-vertical-loop-exact` (exact 4N vertical belt math) into master and
+  reconciled with remote Phases 2–3. Merge was clean; both sides preserved.
+- **Lateral seam fixes in `ADJ`** — four entries were geometrically wrong (funneled all source
+  cells into one fixed destination cell):
+  - `[4][Left]`  Top→Left: now enters Left at `(n-1-y, 0)` moving **Down**
+  - `[4][Right]` Top→Right: now enters Right at `(y, 0)` moving **Down**
+  - `[5][Left]`  Bottom→Left: now enters Left at `(y, n-1)` moving **Up**
+  - `[5][Right]` Bottom→Right: now enters Right at `(n-1-y, n-1)` moving **Up**
+  All 24 ADJ entries are now exactly reversible (see new test).
+- New test `cube_seam_roundtrips`: every cross-face step composed with its inverse returns to
+  the exact source cell for every cell of an N=5 cube.
+- **Blockers now actually block**: `find_all_matches` treats blocked cells as run-breakers
+  (start *and* extension), `try_swap`/`would_match` reject blocked cells.
+- **Gravity no longer overwrites Ice**: compaction previously let falling gems land *on top of*
+  (i.e. overwrite) frozen cells; immovable cells now act as a floor/ceiling that gems stack
+  against (both vertical and horizontal gravity).
+- **Phase 2 unit tests added** (previously missing entirely):
+  - `stone_blocker_falls_with_gravity`
+  - `ice_blocker_is_immovable_under_gravity`
+  - `blocked_cells_reject_swaps_and_break_runs`
+  - `adjacent_match_thaws_one_ice_layer` (2 layers → 1 layer, gem stays frozen)
+  - `antipodal_echo_charges_opposite_face` (degenerate N=1 cube inside a 1x6 board)
+  - `flat2d_antipodal_charge_is_noop`
+- Added `Gem::simple(kind)` helper.
+
+**Known broken (to be fixed in Phase 3 rewrite)**:
+- `CubeSim::try_face_swap` never clears matched gems or refills (fake outcome).
+- `CubeSim` match detection drops face info from `CellId`s.
+- `CubeSim::new_cube_board` match-free check indexes rows by whole-face stride (`idx - per_face`
+  instead of `idx - fs`).
+- `rotate_face_gravity` delegates to `Board::rotate_board` on a fake 6N×N board.
+- 2 compiler warnings in `bewildered-godot` (unused `Flat2D` import, dead `error_message`).
+
+**Verification**: `cargo test --workspace`: 24 core + 4 content + 5 roundtrip = **33/33 PASS**.
+
+**Next**: Phase 3 — GDExtension CubeSim FFI bridge rebuilt on a real core-side CubeBoard.

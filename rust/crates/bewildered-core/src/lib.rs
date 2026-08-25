@@ -151,6 +151,13 @@ pub struct Gem {
     pub blocker: Option<Blocker>,
 }
 
+impl Gem {
+    /// A plain gem with no echo, special, or blocker.
+    pub fn simple(kind: GemKind) -> Self {
+        Self { kind, echo: None, special: None, blocker: None }
+    }
+}
+
 /// Durable blockers that occupy cells and affect gravity/matching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Blocker {
@@ -436,6 +443,13 @@ impl Board {
             return MoveOutcome::Illegal;
         }
 
+        // Blocked cells (Stone/Ice) cannot be swapped by the player.
+        if self.gems[idx1].as_ref().unwrap().blocker.is_some()
+            || self.gems[idx2].as_ref().unwrap().blocker.is_some()
+        {
+            return MoveOutcome::Illegal;
+        }
+
         // Simulate the swap
         self.gems.swap(idx1, idx2);
 
@@ -487,17 +501,25 @@ impl Board {
         // First pass: find all raw matches (horizontal and vertical)
         let mut raw_matches = Vec::new();
 
-        // Horizontal matches
+        // Horizontal matches. Blocked cells (Stone/Ice) never participate in
+        // runs — they break the run like an empty cell would.
         for row in 0..self.height {
             let mut col = 0;
             while col < self.width {
                 let idx = self.idx(row, col);
                 if let Some(gem) = &self.gems[idx] {
+                    if gem.blocker.is_some() {
+                        col += 1;
+                        continue;
+                    }
                     let kind = gem.kind;
                     let mut run_len = 1;
                     while col + run_len < self.width {
                         let next_idx = self.idx(row, col + run_len);
                         if let Some(next_gem) = &self.gems[next_idx] {
+                            if next_gem.blocker.is_some() {
+                                break;
+                            }
                             if next_gem.kind == kind {
                                 run_len += 1;
                             } else {
@@ -520,17 +542,24 @@ impl Board {
             }
         }
 
-        // Vertical matches
+        // Vertical matches (blocked cells break runs, same as horizontal)
         for col in 0..self.width {
             let mut row = 0;
             while row < self.height {
                 let idx = self.idx(row, col);
                 if let Some(gem) = &self.gems[idx] {
+                    if gem.blocker.is_some() {
+                        row += 1;
+                        continue;
+                    }
                     let kind = gem.kind;
                     let mut run_len = 1;
                     while row + run_len < self.height {
                         let next_idx = self.idx(row + run_len, col);
                         if let Some(next_gem) = &self.gems[next_idx] {
+                            if next_gem.blocker.is_some() {
+                                break;
+                            }
                             if next_gem.kind == kind {
                                 run_len += 1;
                             } else {
@@ -869,7 +898,8 @@ impl Board {
     }
 
     /// Compact gems within each column toward the top (Up) or bottom (Down).
-    /// Stone blockers fall with gravity; Ice blockers are immovable until broken.
+    /// Stone blockers fall with gravity; Ice blockers are immovable and act as
+    /// a floor/ceiling that falling gems stack against.
     fn apply_gravity_vertical(&mut self, dir: Direction) {
         for col in 0..self.width {
             let mut write_row = if dir == Direction::Down {
@@ -884,21 +914,31 @@ impl Board {
             };
             for read_row in row_iter {
                 let read_idx = self.idx(read_row, col);
-                if let Some(gem) = &self.gems[read_idx] {
-                    // Check if this cell has an immovable blocker
-                    let immovable = gem.blocker.as_ref().map(|b| b.is_immovable()).unwrap_or(false);
-                    if !immovable {
-                        if read_row != write_row {
-                            let write_idx = self.idx(write_row, col);
-                            self.gems[write_idx] = self.gems[read_idx].take();
+                let immovable = self.gems[read_idx]
+                    .as_ref()
+                    .map(|g| g.blocker.as_ref().map(|b| b.is_immovable()).unwrap_or(false))
+                    .unwrap_or(false);
+                if immovable {
+                    // Frozen cell acts as the new floor: subsequent gems stack
+                    // against it instead of overwriting it.
+                    if dir == Direction::Down {
+                        write_row = read_row.saturating_sub(1);
+                    } else if read_row + 1 < self.height {
+                        write_row = read_row + 1;
+                    }
+                    continue;
+                }
+                if self.gems[read_idx].is_some() {
+                    if read_row != write_row {
+                        let write_idx = self.idx(write_row, col);
+                        self.gems[write_idx] = self.gems[read_idx].take();
+                    }
+                    if dir == Direction::Down {
+                        if write_row > 0 {
+                            write_row -= 1;
                         }
-                        if dir == Direction::Down {
-                            if write_row > 0 {
-                                write_row -= 1;
-                            }
-                        } else {
-                            write_row += 1;
-                        }
+                    } else if write_row + 1 < self.height {
+                        write_row += 1;
                     }
                 }
             }
@@ -906,7 +946,8 @@ impl Board {
     }
 
     /// Compact gems within each row toward the left (Left) or right (Right).
-    /// Stone blockers fall with gravity; Ice blockers are immovable until broken.
+    /// Stone blockers fall with gravity; Ice blockers are immovable and act as
+    /// a wall that sliding gems stack against.
     fn apply_gravity_horizontal(&mut self, dir: Direction) {
         for row in 0..self.height {
             let mut write_col = if dir == Direction::Right {
@@ -921,20 +962,29 @@ impl Board {
             };
             for read_col in col_iter {
                 let read_idx = self.idx(row, read_col);
-                if let Some(gem) = &self.gems[read_idx] {
-                    let immovable = gem.blocker.as_ref().map(|b| b.is_immovable()).unwrap_or(false);
-                    if !immovable {
-                        if read_col != write_col {
-                            let write_idx = self.idx(row, write_col);
-                            self.gems[write_idx] = self.gems[read_idx].take();
+                let immovable = self.gems[read_idx]
+                    .as_ref()
+                    .map(|g| g.blocker.as_ref().map(|b| b.is_immovable()).unwrap_or(false))
+                    .unwrap_or(false);
+                if immovable {
+                    if dir == Direction::Right {
+                        write_col = read_col.saturating_sub(1);
+                    } else if read_col + 1 < self.width {
+                        write_col = read_col + 1;
+                    }
+                    continue;
+                }
+                if self.gems[read_idx].is_some() {
+                    if read_col != write_col {
+                        let write_idx = self.idx(row, write_col);
+                        self.gems[write_idx] = self.gems[read_idx].take();
+                    }
+                    if dir == Direction::Right {
+                        if write_col > 0 {
+                            write_col -= 1;
                         }
-                        if dir == Direction::Right {
-                            if write_col > 0 {
-                                write_col -= 1;
-                            }
-                        } else {
-                            write_col += 1;
-                        }
+                    } else if write_col + 1 < self.width {
+                        write_col += 1;
                     }
                 }
             }
@@ -1048,6 +1098,13 @@ impl Board {
             return false;
         }
 
+        // Blocked cells can never be swapped into a match.
+        if self.gems[idx1].as_ref().unwrap().blocker.is_some()
+            || self.gems[idx2].as_ref().unwrap().blocker.is_some()
+        {
+            return false;
+        }
+
         // Simulate swap
         let kind1 = self.gems[idx1].as_ref().unwrap().kind;
         let kind2 = self.gems[idx2].as_ref().unwrap().kind;
@@ -1065,7 +1122,7 @@ impl Board {
         while c > 0 {
             c -= 1;
             if let Some(gem) = self.gem(row, c) {
-                if gem.kind == kind {
+                if gem.blocker.is_none() && gem.kind == kind {
                     count += 1;
                 } else {
                     break;
@@ -1079,7 +1136,7 @@ impl Board {
         while c + 1 < self.width {
             c += 1;
             if let Some(gem) = self.gem(row, c) {
-                if gem.kind == kind {
+                if gem.blocker.is_none() && gem.kind == kind {
                     count += 1;
                 } else {
                     break;
@@ -1099,7 +1156,7 @@ impl Board {
         while r > 0 {
             r -= 1;
             if let Some(gem) = self.gem(r, col) {
-                if gem.kind == kind {
+                if gem.blocker.is_none() && gem.kind == kind {
                     count += 1;
                 } else {
                     break;
@@ -1113,7 +1170,7 @@ impl Board {
         while r + 1 < self.height {
             r += 1;
             if let Some(gem) = self.gem(r, col) {
-                if gem.kind == kind {
+                if gem.blocker.is_none() && gem.kind == kind {
                     count += 1;
                 } else {
                     break;
@@ -1180,6 +1237,11 @@ pub fn calculate_score(outcome: &MoveOutcome, combo: usize, rule_modifiers: &Rul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Free-function index helper avoiding two-phase borrow issues in tests.
+    fn idx_of(b: &Board, r: usize, c: usize) -> usize {
+        b.idx(r, c)
+    }
 
     /// A 4-in-a-row match must leave a horizontal Bolt special gem persisted on
     /// the board (not just fire a create signal). This guards the FFI contract
@@ -1324,6 +1386,166 @@ mod tests {
         assert_eq!(Direction::Right.rotate_ccw(), Direction::Up);
         assert_eq!(Direction::Up.rotate_ccw(), Direction::Left);
         assert_eq!(Direction::Left.rotate_ccw(), Direction::Down);
+    }
+
+    /// Stone blockers fall with gravity like normal gems.
+    #[test]
+    fn stone_blocker_falls_with_gravity() {
+        let mut board = Board::new(3, 3, 1, vec![GemKind::Circle, GemKind::Triangle]);
+        // Empty the middle column below a Stone at (0,1).
+        let i = idx_of(&board, 1, 1);
+        board.gems[i] = None;
+        let i = idx_of(&board, 2, 1);
+        board.gems[i] = None;
+        let i = idx_of(&board, 0, 1);
+        board.gems[i] = Some(Gem {
+            kind: GemKind::Square,
+            echo: None,
+            special: None,
+            blocker: Some(Blocker::Stone),
+        });
+
+        board.resolve_gravity(Direction::Down);
+
+        // Stone compacts to the bottom of its column.
+        let bottom = board.gem(2, 1).expect("stone must land at bottom");
+        assert_eq!(bottom.blocker, Some(Blocker::Stone));
+        // Cells above refilled with normal gems (no blocker).
+        for r in 0..2 {
+            let g = board.gem(r, 1).expect("refilled");
+            assert!(g.blocker.is_none());
+        }
+    }
+
+    /// Ice blockers are immune to gravity: neither they nor gems stacked above
+    /// them fall past their frozen position.
+    #[test]
+    fn ice_blocker_is_immovable_under_gravity() {
+        let mut board = Board::new(3, 3, 1, vec![GemKind::Circle, GemKind::Triangle]);
+        let i = idx_of(&board, 2, 1);
+        board.gems[i] = None;
+        let i = idx_of(&board, 1, 1);
+        board.gems[i] = Some(Gem {
+            kind: GemKind::Circle,
+            echo: None,
+            special: None,
+            blocker: Some(Blocker::Ice { layers: 2 }),
+        });
+
+        board.resolve_gravity(Direction::Down);
+
+        let g = board.gem(1, 1).expect("iced gem must stay put");
+        assert_eq!(g.blocker, Some(Blocker::Ice { layers: 2 }));
+    }
+
+    /// Blocked cells cannot be swapped and never participate in match runs.
+    #[test]
+    fn blocked_cells_reject_swaps_and_break_runs() {
+        let kinds = vec![GemKind::Circle, GemKind::Triangle];
+        let mut board = Board::new(4, 1, 1, kinds);
+        // Row: Circle, Circle(stoned), Circle, Triangle
+        for (c, mut g) in [
+            (0usize, Gem::simple(GemKind::Circle)),
+            (1, Gem::simple(GemKind::Circle)),
+            (2, Gem::simple(GemKind::Circle)),
+            (3, Gem::simple(GemKind::Triangle)),
+        ] {
+            if c == 1 {
+                g.blocker = Some(Blocker::Stone);
+            }
+            let i = idx_of(&board, 0, c);
+            board.gems[i] = Some(g);
+        }
+
+        // Three Circles exist but the Stone breaks the run — no match.
+        assert!(board.find_all_matches().is_empty());
+
+        // Swapping the stoned cell is rejected outright.
+        assert!(matches!(
+            board.try_swap(0, 1, 0, 2),
+            MoveOutcome::Illegal
+        ));
+    }
+
+    /// An adjacent match chips one ice layer per cascade step. With two layers,
+    /// one move leaves the gem still frozen (and immovable).
+    #[test]
+    fn adjacent_match_thaws_one_ice_layer() {
+        let mut board = Board::new(4, 4, 7, vec![
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+        ]);
+        let set = |b: &mut Board, r: usize, c: usize, k: GemKind, blk: Option<Blocker>| {
+            let i = b.idx(r, c);
+            b.gems[i] = Some(Gem { kind: k, echo: None, special: None, blocker: blk });
+        };
+        // Grid chosen so swapping (0,2)<->(1,2) makes a C-C-C row match at
+        // row 1, orthogonal to the iced gem at (2,1). No pre-existing runs.
+        set(&mut board, 0, 0, GemKind::Triangle, None);
+        set(&mut board, 0, 1, GemKind::Square, None);
+        set(&mut board, 0, 2, GemKind::Circle, None);
+        set(&mut board, 0, 3, GemKind::Triangle, None);
+        set(&mut board, 1, 0, GemKind::Circle, None);
+        set(&mut board, 1, 1, GemKind::Circle, None);
+        set(&mut board, 1, 2, GemKind::Square, None);
+        set(&mut board, 1, 3, GemKind::Diamond, None);
+        set(&mut board, 2, 0, GemKind::Diamond, None);
+        set(&mut board, 2, 1, GemKind::Square, Some(Blocker::Ice { layers: 2 }));
+        set(&mut board, 2, 2, GemKind::Diamond, None);
+        set(&mut board, 2, 3, GemKind::Square, None);
+        set(&mut board, 3, 0, GemKind::Square, None);
+        set(&mut board, 3, 1, GemKind::Diamond, None);
+        set(&mut board, 3, 2, GemKind::Triangle, None);
+        set(&mut board, 3, 3, GemKind::Circle, None);
+
+        assert!(board.find_all_matches().is_empty(), "setup must be match-free");
+
+        let outcome = board.try_swap(0, 2, 1, 2);
+        assert!(matches!(outcome, MoveOutcome::Success { .. }), "swap must create the row match");
+
+        // One adjacent match step: 2 layers -> 1 layer. The gem is still frozen
+        // in place (gravity cannot move it).
+        let g = board.gem(2, 1).expect("iced gem still at its cell");
+        assert_eq!(g.blocker, Some(Blocker::Ice { layers: 1 }));
+    }
+
+    /// Echo detonations charge the exact antipodal cell through the cube
+    /// (verified on a degenerate 1x1-face cube where all 6 faces fit in a
+    /// 1x6 board: cell 0 (Front) charges cell 2 (Back)).
+    #[test]
+    fn antipodal_echo_charges_opposite_face() {
+        let mods = RuleModifiers {
+            topology: Some(Box::new(Cube6Face::new(1))),
+            ..RuleModifiers::new()
+        };
+        let mut board = Board::with_rules(1, 6, 3, vec![GemKind::Circle], mods);
+
+        board.charge_antipodal_echo(0, 0);
+
+        // Face 0 cell 0 -> antipode is Face 2 cell 0 = index 2 = (row 2, col 0).
+        let anti = board.gem(2, 0).expect("antipodal cell occupied");
+        let echo = anti.echo.as_ref().expect("antipode must carry an echo charge");
+        assert!(echo.moves_left >= 2, "antipodal echo lasts at least 2 moves");
+
+        // Non-antipodal cells stay uncharged.
+        assert!(board.gem(1, 0).unwrap().echo.is_none());
+        assert!(board.gem(3, 0).unwrap().echo.is_none());
+    }
+
+    /// On Flat2D there is no antipode: charging must be a clean no-op.
+    #[test]
+    fn flat2d_antipodal_charge_is_noop() {
+        let mods = RuleModifiers {
+            topology: Some(Box::new(Flat2D::new(3, 3))),
+            ..RuleModifiers::new()
+        };
+        let mut board = Board::with_rules(3, 3, 3, vec![GemKind::Circle], mods);
+
+        board.charge_antipodal_echo(1, 1);
+
+        assert!(board.gems.iter().flatten().all(|g| g.echo.is_none()));
     }
 
     /// rotate_board transposes the physical grid, swaps width/height, and keeps

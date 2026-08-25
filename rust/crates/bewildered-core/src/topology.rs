@@ -192,10 +192,10 @@ const ADJ: [[AdjFn; 4]; 6] = [
         |x, _y, _n| (0, x, 0, Direction::Down),
         // Down  (v=n-1,z=0):-> Face 2 (Back),   enter at v=0 (y=N),      dir Down
         |x, _y, n| (2, n - 1 - x, 0, Direction::Down),
-        // Left  (u=0,x=0):  -> Face 3 (Left),   enter at u=0 (x=0),      dir Right
-        |x, _y, n| (3, 0, n - 1 - x, Direction::Right),
-        // Right (u=n-1,x=N):-> Face 1 (Right),  enter at u=0 (x=N),      dir Right
-        |x, _y, n| (1, 0, n - 1 - x, Direction::Right),
+        // Left  (u=0,x=0):  -> Face 3 (Left),   enter at u=n-1-y (z),     dir Down
+        |_x, y, n| (3, n - 1 - y, 0, Direction::Down),
+        // Right (u=n-1,x=N):-> Face 1 (Right),  enter at u=y (z),         dir Down
+        |_x, y, _n| (1, y, 0, Direction::Down),
     ],
     // Face 5: Bottom (-Y)  u=+X, v=+Z
     [
@@ -203,10 +203,10 @@ const ADJ: [[AdjFn; 4]; 6] = [
         |x, _y, n| (2, n - 1 - x, n - 1, Direction::Up),
         // Down  (v=n-1,z=N):-> Face 0 (Front),  enter at v=n-1 (y=1),    dir Up
         |x, _y, n| (0, x, n - 1, Direction::Up),
-        // Left  (u=0,x=0):  -> Face 3 (Left),   enter at v=n-1 (y=0),    dir Down
-        |_x, _y, n| (3, 0, n - 1, Direction::Down),
-        // Right (u=n-1,x=N):-> Face 1 (Right),  enter at v=n-1 (y=0),    dir Down
-        |_x, _y, n| (1, 0, n - 1, Direction::Down),
+        // Left  (u=0,x=0):  -> Face 3 (Left),   enter at u=y (z),        dir Up
+        |_x, y, n| (3, y, n - 1, Direction::Up),
+        // Right (u=n-1,x=N):-> Face 1 (Right),  enter at u=n-1-y (z),    dir Up
+        |_x, y, n| (1, n - 1 - y, n - 1, Direction::Up),
     ],
 ];
 
@@ -506,6 +506,54 @@ mod tests {
         gems[1] = Some(1);
         let runs = find_line_runs(&t, &gems, 3);
         assert!(runs.is_empty());
+    }
+
+    /// Every cross-face step must be exactly reversible: stepping from the
+    /// destination back in the opposite travel direction must land on the
+    /// original source cell. This validates all 24 ADJ entries as a
+    /// consistent cube manifold (no funneled/lost cells at seams).
+    #[test]
+    fn cube_seam_roundtrips() {
+        let n = 5;
+        let t = Cube6Face::new(n);
+        let dirs = [
+            Direction::Up,
+            Direction::Down,
+            Direction::Left,
+            Direction::Right,
+        ];
+        let opposite = |d: Direction| match d {
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+            Direction::Left => Direction::Right,
+            Direction::Right => Direction::Left,
+        };
+        for f in 0..6usize {
+            for y in 0..n {
+                for x in 0..n {
+                    let cell = CellId((f * n * n + y * n + x) as u32);
+                    for &d in &dirs {
+                        if let Some((next, ndir)) = t.step(cell, d) {
+                            if t.face_of(next) == f {
+                                continue; // in-face step, not a seam
+                            }
+                            let (back, _bdir) = t.step(next, opposite(ndir)).unwrap_or_else(|| {
+                                panic!("no reverse step across {:?} from face {} ({},{})", d, f, x, y)
+                            });
+                            assert_eq!(
+                                back, cell,
+                                "seam {:?} face {} ({},{}) -> face {} is not reversible",
+                                d,
+                                f,
+                                x,
+                                y,
+                                t.face_of(next)
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
