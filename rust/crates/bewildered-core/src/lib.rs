@@ -7,7 +7,9 @@ use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 
 pub mod gem_types;
+pub mod topology;
 pub use gem_types::GemKind;
+pub use topology::{find_line_runs, CellId, Cube6Face, Flat2D, Topology};
 
 /// The direction gravity pulls gems toward. Down = toward the bottom row,
 /// Right = toward the right column, Up = toward the top row, Left = toward the
