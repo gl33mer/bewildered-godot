@@ -40,6 +40,12 @@ pub struct CubeBoard {
     pub combo: usize,
     pub resonance_multiplier: f32,
     pub resonance_stack: usize,
+    /// Relic bonus: freshly seeded echo charges last 1 + this many turns.
+    pub echo_extra_moves: u8,
+    /// Relic bonus: fractional score multiplier applied by the FFI layer.
+    pub score_bonus_pct: f32,
+    /// Relic bonus: extra moves granted at chamber start (run-layer).
+    pub extra_moves: u8,
 }
 
 impl CubeBoard {
@@ -54,6 +60,9 @@ impl CubeBoard {
             combo: 0,
             resonance_multiplier: 1.0,
             resonance_stack: 0,
+            echo_extra_moves: 0,
+            score_bonus_pct: 0.0,
+            extra_moves: 0,
         };
         board.fill_random_match_free();
         board
@@ -357,7 +366,7 @@ impl CubeBoard {
                 if self.cells[i].is_none() {
                     let mut gem = self.random_gem();
                     if pending.binary_search(&CellId(i as u32)).is_ok() {
-                        gem.echo = Some(EchoCharge::new());
+                        gem.echo = Some(EchoCharge::with_duration(1 + self.echo_extra_moves));
                         fresh_charges.push(CellId(i as u32));
                     }
                     self.cells[i] = Some(gem);

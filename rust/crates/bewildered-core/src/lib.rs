@@ -8,9 +8,11 @@ use serde::{Deserialize, Serialize};
 
 pub mod cube_board;
 pub mod gem_types;
+pub mod relics;
 pub mod topology;
 pub use cube_board::{CubeBoard, CubeOutcome};
 pub use gem_types::GemKind;
+pub use relics::{DescentRun, Relic, Rarity};
 pub use topology::{find_line_runs, CellId, Cube6Face, Flat2D, Topology};
 
 /// The direction gravity pulls gems toward. Down = toward the bottom row,

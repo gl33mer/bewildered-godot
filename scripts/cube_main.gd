@@ -55,6 +55,14 @@ var busy := false
 var status_label: Label
 var faces_root: Node3D
 
+# Descent (Phase 6)
+const DESCENT_LENGTH := 3
+var runner: DescentRunner
+var relic_ui: RelicSelection
+var held_relics: Array = []
+var stats_label: Label
+var tray_box: HBoxContainer
+
 const ANTIPODE_FACE := [2, 3, 0, 1, 5, 4]
 
 
@@ -67,12 +75,22 @@ func _ready() -> void:
 
 	_build_hud()
 
-	_start_chamber(face_size)
+	start_descent(face_size)
 
 
-## (Re)build the whole chamber for a face size (4..10). Keys 1-4 switch live.
-func _start_chamber(n: int) -> void:
+## Begin a fresh descent at the given face size (also the size-switch entry).
+func start_descent(n: int) -> void:
 	face_size = clampi(n, 4, 10)
+	_build_chamber_visuals()
+
+	runner = DescentRunner.new()
+	runner.start_run(BOARD_SEED)
+	held_relics.clear()
+	_begin_chamber()
+
+
+## Rebuild sim + faces for the current face_size and wire sim signals.
+func _build_chamber_visuals() -> void:
 	if faces_root:
 		faces_root.queue_free()
 	if _refresh_timer:
@@ -89,6 +107,7 @@ func _start_chamber(n: int) -> void:
 	sim.cube_echo_detonated.connect(_on_echo_detonated)
 	sim.antipodal_echo_charged.connect(_on_antipodal_charged)
 	sim.cube_special_gem_created.connect(_on_special_created)
+	sim.descent_chamber_finished.connect(_on_chamber_finished)
 
 	faces_root = Node3D.new()
 	faces_root.name = "Faces"
@@ -97,7 +116,15 @@ func _start_chamber(n: int) -> void:
 		_build_face(f)
 
 	camera.set_distance(2.35 * face_size + 1.4)
+
+
+## Apply relic modifiers and start the runner's current chamber.
+func _begin_chamber() -> void:
+	sim.set_relic_modifiers(
+		runner.get_echo_extra(), runner.get_score_pct(), runner.get_extra_moves())
+	sim.start_chamber(runner.get_chamber(), runner.get_chamber_seed())
 	_refresh_all()
+	_update_tray()
 
 
 # ---------------------------------------------------------------- building --
@@ -224,11 +251,54 @@ func _build_hud() -> void:
 	layer.add_child(status_label)
 
 	var hint := Label.new()
-	hint.text = "A/D turn  ·  W/S pitch  ·  Q/E tumble  ·  Click swap  ·  1-4 board size (4/6/8/10)"
+	hint.text = "A/D turn  ·  W/S pitch  ·  Q/E tumble  ·  Click swap  ·  1-4 board size  ·  R restart descent"
 	hint.position = Vector2(16, 44)
 	hint.add_theme_font_size_override("font_size", 15)
 	hint.modulate = Color(1, 1, 1, 0.75)
 	layer.add_child(hint)
+
+	stats_label = Label.new()
+	stats_label.text = ""
+	stats_label.position = Vector2(16, 72)
+	stats_label.add_theme_font_size_override("font_size", 16)
+	stats_label.add_theme_color_override("font_color", Color("ffd76a"))
+	layer.add_child(stats_label)
+
+	# Relic tray (held relic badges with hover tooltips).
+	tray_box = HBoxContainer.new()
+	tray_box.position = Vector2(16, 100)
+	tray_box.add_theme_constant_override("separation", 6)
+	layer.add_child(tray_box)
+
+	relic_ui = RelicSelection.new()
+	relic_ui.relic_chosen.connect(_on_relic_chosen)
+	add_child(relic_ui)
+
+
+func _update_tray() -> void:
+	for child in tray_box.get_children():
+		child.queue_free()
+	held_relics = runner.get_held_relics() if runner and runner.is_running() else []
+	for relic in held_relics:
+		var badge := PanelContainer.new()
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("232c4e")
+		style.set_corner_radius_all(6)
+		style.content_margin_left = 8.0
+		style.content_margin_right = 8.0
+		style.content_margin_top = 3.0
+		style.content_margin_bottom = 3.0
+		badge.add_theme_stylebox_override("panel", style)
+		var label := Label.new()
+		label.text = "◆ %s" % str(relic.get("name", ""))
+		label.add_theme_font_size_override("font_size", 13)
+		badge.add_child(label)
+		badge.tooltip_text = "%s (%s): %s" % [
+			str(relic.get("name", "")),
+			str(relic.get("rarity", "")),
+			str(relic.get("description", "")),
+		]
+		tray_box.add_child(badge)
 
 
 func _cell_local(x: int, y: int) -> Vector3:
@@ -416,6 +486,28 @@ func _schedule_refresh() -> void:
 	_refresh_timer.start()
 
 
+func _on_chamber_finished(chamber: int, cleared: bool) -> void:
+	busy = true
+	if cleared:
+		if chamber >= DESCENT_LENGTH:
+			_update_status("DESCENT COMPLETE — %d relic(s) held. Press R for a new run." % held_relics.size())
+		else:
+			_update_status("Chamber %d cleared! Choose a relic…" % chamber)
+			var offers: Array = runner.next_draft()
+			relic_ui.show_offers(offers)
+	else:
+		_update_status("Descent failed — press R to restart")
+
+
+func _on_relic_chosen(id: String) -> void:
+	runner.choose_relic(id)
+	runner.advance_chamber()
+	relic_ui.hide_offers()
+	_begin_chamber()
+	busy = false
+	_update_status("Chamber %d — %d relic(s) held" % [runner.get_chamber(), runner.get_relic_count()])
+
+
 func _on_refresh_timer() -> void:
 	for key in gem_nodes:
 		var gem: MeshInstance3D = gem_nodes[key]
@@ -461,10 +553,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_S, KEY_DOWN: _try_pitch(false)
 			KEY_Q: _try_tumble(false)
 			KEY_E: _try_tumble(true)
-			KEY_1: _start_chamber(4)
-			KEY_2: _start_chamber(6)
-			KEY_3: _start_chamber(8)
-			KEY_4: _start_chamber(10)
+			KEY_1: start_descent(4)
+			KEY_2: start_descent(6)
+			KEY_3: start_descent(8)
+			KEY_4: start_descent(10)
+			KEY_R: start_descent(face_size)
 	elif event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		_handle_click(event.position)
@@ -622,6 +715,12 @@ func _update_status(text: String) -> void:
 func _process(_delta: float) -> void:
 	var names := ["Front", "Right", "Back", "Left", "Top", "Bottom"]
 	_update_status_label_if_idle(names[_active_face_id()])
+	if stats_label and sim:
+		stats_label.text = "Chamber %d/%d   ·   Score %d/%d   ·   Moves %d" % [
+			sim.get_chamber(), DESCENT_LENGTH,
+			sim.get_score(), sim.get_score_target(),
+			sim.get_moves_remaining(),
+		]
 
 
 var _last_face_name := ""

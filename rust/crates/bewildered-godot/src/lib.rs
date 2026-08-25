@@ -1,5 +1,5 @@
 use godot::prelude::*;
-use bewildered_core::{Blocker, Board, CubeBoard, CubeOutcome, GemKind, MoveOutcome, RuleModifiers, SpecialGem};
+use bewildered_core::{Blocker, Board, CubeBoard, CubeOutcome, DescentRun, GemKind, MoveOutcome, Relic, RuleModifiers, SpecialGem};
 use bewildered_content::{BlockerKind, Level, Objective};
 use std::collections::HashMap;
 
@@ -577,11 +577,39 @@ impl BoardSim {
 /// Multi-face cube simulation for 3D Bewildered. A thin FFI shell over
 /// [`bewildered_core::CubeBoard`] — all rules live in bewildered-core.
 #[derive(GodotClass)]
-#[class(base=RefCounted, init)]
+#[class(base=RefCounted)]
 pub struct CubeSim {
     cube: Option<CubeBoard>,
     face_size: i32,
+    // Descent chamber accounting (Phase 6)
+    chamber: i32,
+    score: i64,
+    moves_used: i32,
+    moves_total: i32,
+    score_target: i64,
+    chamber_cleared: bool,
+    chamber_failed: bool,
+    relic_extra_moves: i32,
     base: Base<RefCounted>,
+}
+
+#[godot_api]
+impl IRefCounted for CubeSim {
+    fn init(_base: Base<RefCounted>) -> Self {
+        Self {
+            cube: None,
+            face_size: 6,
+            chamber: 1,
+            score: 0,
+            moves_used: 0,
+            moves_total: 0,
+            score_target: 0,
+            chamber_cleared: false,
+            chamber_failed: false,
+            relic_extra_moves: 0,
+            base: _base,
+        }
+    }
 }
 
 #[godot_api]
@@ -600,6 +628,9 @@ impl CubeSim {
 
     #[signal]
     fn cube_move_rejected(face: i32, ax: i32, ay: i32, bx: i32, by: i32);
+
+    #[signal]
+    fn descent_chamber_finished(chamber: i32, cleared: bool);
 
     /// Create a match-free N x N x 6 cube board (deterministic seed).
     #[func]
@@ -725,6 +756,63 @@ impl CubeSim {
         self.cube.is_some()
     }
 
+    // --- Descent chamber lifecycle (Phase 6) ---
+
+    /// Apply relic modifiers to this chamber's simulation.
+    #[func]
+    fn set_relic_modifiers(&mut self, echo_extra: i32, score_pct: f32, extra_moves: i32) {
+        if let Some(cube) = &mut self.cube {
+            cube.echo_extra_moves = echo_extra.max(0) as u8;
+            cube.score_bonus_pct = score_pct;
+            cube.extra_moves = extra_moves.max(0) as u8;
+        }
+        self.relic_extra_moves = extra_moves.max(0);
+    }
+
+    /// Start a descent chamber: fresh board, chamber-scaled score target,
+    /// move pool = 18 + relic bonus + 2 per chamber beyond the first.
+    #[func]
+    fn start_chamber(&mut self, chamber: i32, seed: i64) {
+        self.new_cube_board(self.face_size.max(2), seed);
+        self.chamber = chamber;
+        self.score = 0;
+        self.moves_used = 0;
+        self.score_target = 600 + 400 * (chamber - 1).max(0) as i64;
+        self.moves_total = 18 + self.relic_extra_moves + 2 * (chamber - 1).max(0);
+        self.chamber_cleared = false;
+        self.chamber_failed = false;
+    }
+
+    #[func]
+    fn get_chamber(&self) -> i32 {
+        self.chamber
+    }
+
+    #[func]
+    fn get_score(&self) -> i64 {
+        self.score
+    }
+
+    #[func]
+    fn get_score_target(&self) -> i64 {
+        self.score_target
+    }
+
+    #[func]
+    fn get_moves_remaining(&self) -> i32 {
+        (self.moves_total - self.moves_used).max(0)
+    }
+
+    #[func]
+    fn is_chamber_cleared(&self) -> bool {
+        self.chamber_cleared
+    }
+
+    #[func]
+    fn is_chamber_failed(&self) -> bool {
+        self.chamber_failed
+    }
+
     // --- signal emission helpers ---
 
     fn emit_move_rejected(&mut self, face: i32, ax: i32, ay: i32, bx: i32, by: i32) {
@@ -743,6 +831,30 @@ impl CubeSim {
     /// Convert a core outcome into presentation signals. Cells are grouped per
     /// face so each signal's coordinates are face-local.
     fn emit_cube_outcome(&mut self, outcome: &CubeOutcome) {
+        // --- descent accounting ---
+        if !self.chamber_cleared && !self.chamber_failed {
+            self.moves_used += 1;
+            let cleared_count: usize = outcome.clears_by_depth.iter().map(|d| d.len()).sum();
+            let base = 10.0f32 * cleared_count as f32
+                * 1.5f32.powi(outcome.cascades as i32)
+                * outcome.resonance_multiplier;
+            let bonus = 1.0 + self.cube.as_ref().map(|c| c.score_bonus_pct).unwrap_or(0.0);
+            self.score += (base * bonus) as i64;
+            if self.score >= self.score_target {
+                self.chamber_cleared = true;
+            } else if self.moves_used >= self.moves_total {
+                self.chamber_failed = true;
+            }
+            if self.chamber_cleared || self.chamber_failed {
+                let chamber = self.chamber;
+                let cleared = self.chamber_cleared;
+                self.base_mut().emit_signal(
+                    "descent_chamber_finished",
+                    &[chamber.to_variant(), cleared.to_variant()],
+                );
+            }
+        }
+
         // One match_resolved per (cascade depth, face) group.
         for (depth, depth_cells) in outcome.clears_by_depth.iter().enumerate() {
             let mut groups: std::collections::BTreeMap<i32, (Array<Vector2i>, i32)> =
@@ -837,6 +949,156 @@ impl CubeSim {
                 );
             }
         }
+    }
+}
+
+/// Roguelike Descent run orchestrator: chamber progression and the
+/// between-chamber 3-relic draft. Thin shell over bewildered_core::DescentRun.
+#[derive(GodotClass)]
+#[class(base=RefCounted)]
+pub struct DescentRunner {
+    run: Option<DescentRun>,
+    pending_offers: Vec<Relic>,
+    base: Base<RefCounted>,
+}
+
+#[godot_api]
+impl IRefCounted for DescentRunner {
+    fn init(_base: Base<RefCounted>) -> Self {
+        Self {
+            run: None,
+            pending_offers: Vec::new(),
+            base: _base,
+        }
+    }
+}
+
+#[godot_api]
+impl DescentRunner {
+    #[signal]
+    fn draft_ready(offers: Array<Dictionary>);
+
+    /// Begin a fresh descent (chamber 1, no relics).
+    #[func]
+    fn start_run(&mut self, seed: i64) {
+        self.run = Some(DescentRun::new(seed as u64));
+        self.pending_offers.clear();
+    }
+
+    #[func]
+    fn is_running(&self) -> bool {
+        self.run.is_some()
+    }
+
+    #[func]
+    fn get_chamber(&self) -> i32 {
+        self.run.as_ref().map(|r| r.chamber as i32).unwrap_or(0)
+    }
+
+    #[func]
+    fn get_chamber_seed(&self) -> i64 {
+        self.run
+            .as_ref()
+            .map(|r| r.chamber_seed() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Roll the 3-relic draft for the current transition and return the
+    /// offers as Array of {id, name, description, rarity}.
+    #[func]
+    fn next_draft(&mut self) -> Array<Dictionary> {
+        let mut arr = Array::new();
+        let Some(run) = &mut self.run else {
+            return arr;
+        };
+        self.pending_offers = run.draft_offers();
+        for relic in &self.pending_offers {
+            let mut d = Dictionary::new();
+            d.set("id", relic.id.to_variant());
+            d.set("name", relic.name.to_variant());
+            d.set("description", relic.description.to_variant());
+            d.set("rarity", relic.rarity.as_str().to_variant());
+            arr.push(&d);
+        }
+        self.base_mut().emit_signal("draft_ready", &[arr.to_variant()]);
+        arr
+    }
+
+    /// Choose one of the pending offers by id. Merges its modifiers.
+    /// Returns false if the id is not among the pending offers.
+    #[func]
+    fn choose_relic(&mut self, id: GString) -> bool {
+        let id_s = id.to_string();
+        let Some(relic) = self
+            .pending_offers
+            .iter()
+            .find(|r| r.id == id_s)
+            .cloned()
+        else {
+            return false;
+        };
+        if let Some(run) = &mut self.run {
+            run.pick_relic(&relic);
+        }
+        self.pending_offers.clear();
+        true
+    }
+
+    /// Advance to the next chamber.
+    #[func]
+    fn advance_chamber(&mut self) {
+        if let Some(run) = &mut self.run {
+            run.advance_chamber();
+        }
+    }
+
+    // Merged relic modifier getters (for wiring into CubeSim).
+
+    #[func]
+    fn get_extra_moves(&self) -> i32 {
+        self.run
+            .as_ref()
+            .map(|r| r.modifiers.extra_moves as i32)
+            .unwrap_or(0)
+    }
+
+    #[func]
+    fn get_echo_extra(&self) -> i32 {
+        self.run
+            .as_ref()
+            .map(|r| r.modifiers.echo_extra_moves as i32)
+            .unwrap_or(0)
+    }
+
+    #[func]
+    fn get_score_pct(&self) -> f32 {
+        self.run
+            .as_ref()
+            .map(|r| r.modifiers.score_bonus_pct)
+            .unwrap_or(0.0)
+    }
+
+    /// Number of relics held.
+    #[func]
+    fn get_relic_count(&self) -> i32 {
+        self.run.as_ref().map(|r| r.relics.len() as i32).unwrap_or(0)
+    }
+
+    /// Held relic summaries (id, name, description, rarity) for the HUD tray.
+    #[func]
+    fn get_held_relics(&self) -> Array<Dictionary> {
+        let mut arr = Array::new();
+        if let Some(run) = &self.run {
+            for relic in &run.relics {
+                let mut d = Dictionary::new();
+                d.set("id", relic.id.to_variant());
+                d.set("name", relic.name.to_variant());
+                d.set("description", relic.description.to_variant());
+                d.set("rarity", relic.rarity.as_str().to_variant());
+                arr.push(&d);
+            }
+        }
+        arr
     }
 }
 

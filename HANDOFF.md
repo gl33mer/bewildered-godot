@@ -808,3 +808,49 @@ closed; all work continues from `~/Projects/BewilderedGodot_OpenCode`.
 scaling, tumble at 8×8, board fullness, beam/shatter node lifecycle, no runtime errors.
 
 **Next**: Phase 6 — Roguelike Descent loop & relic drafting.
+
+### Phase 6 — Roguelike Descent Loop & Relic Drafting ✅ COMPLETE
+
+**Date**: 2026-08-25
+**Baseline**: Phase 5 commit
+
+**Relic engine** (`rust/crates/bewildered-core/src/relics.rs`, new):
+- `Relic { id, name, description, rarity, modifiers }` + 7-relic static pool, only
+  modifiers with real simulation effects are pool-eligible:
+  Time Weaver (+4 moves), Echo Chamber (+2 echo turns), Resonant Heart (+1 echo turn),
+  Golden Touch (+30% score), Midas Core (+60% score), Deep Echoes (+3 moves, +1 echo),
+  Gilded Hours (+2 moves, +15% score)
+- `DescentRun` — chamber progression, deterministic per-seed 3-relic drafts
+  (distinct, excludes owned), modifier merging on pick, per-chamber board seeds
+- `CubeBoard` gains `echo_extra_moves` / `score_bonus_pct` / `extra_moves` fields;
+  freshly seeded echo charges now last `1 + echo_extra_moves` turns (relic effect)
+- Tests: draft distinctness/determinism, duplicate-pick no-op, modifier stacking,
+  chamber seed variation, full 3-chamber flow (6 new)
+
+**FFI** (`rust/crates/bewildered-godot/src/lib.rs`):
+- `DescentRunner` class: `start_run`, `next_draft` (Array of {id,name,description,rarity}
+  + `draft_ready` signal), `choose_relic(id)`, `advance_chamber`, merged-modifier getters,
+  `get_held_relics` for the HUD tray
+- `CubeSim` descent accounting: `set_relic_modifiers`, `start_chamber(chamber, seed)`
+  (target = 600 + 400·(chamber−1), moves = 18 + relic bonus + 2·(chamber−1)),
+  score computed per move (10/cell · 1.5^cascades · resonance · relic bonus),
+  `descent_chamber_finished(chamber, cleared)` signal, getters
+
+**Godot**:
+- `scenes/relic_selection.tscn` + `scripts/relic_selection.gd`: dim overlay + 3 styled
+  relic cards (rarity-colored borders: Common/Rare/Epic), Choose buttons, `relic_chosen(id)`
+- `scripts/cube_main.gd`: full descent flow — chamber clear → draft screen → pick →
+  modifiers applied → next chamber; HUD adds Chamber/Score/Moves line and a relic tray
+  (badges with hover tooltips); keys 1-4 restart the descent at that board size, R restarts
+
+**MCP live verification** (full playthrough):
+- Chamber 1 cleared 641/600 in 4 moves → draft screen rendered (3 rarity cards)
+- Picked Deep Echoes → chamber 2 started with 23 moves (18+3 relic+2 scaling), tray badge
+- Chamber 2 cleared 2624/1000 → second relic picked → chamber 3
+- Chamber 3 cleared 115007/1800 → runner advanced past chamber 3, 2 relics held
+- `choose_relic` correctly rejects ids not in the current draft set
+
+**Verification**: `cargo test --workspace` 45/45 PASS (36 core), 0 warnings.
+
+**Next**: Post-roadmap polish — balance pass on resonance compounding, audio wiring for
+cube signals, daily-seed descent.
