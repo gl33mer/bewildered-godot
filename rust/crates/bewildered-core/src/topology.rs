@@ -13,13 +13,15 @@
 //! ordered: 0=Front, 1=Right, 2=Back, 3=Left, 4=Top, 5=Bottom.
 
 use crate::Direction;
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 
 /// A cell handle inside a topology. Index space is topology-defined.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CellId(pub u32);
 
 /// A `Topology` describes cell adjacency, face membership and antipodes.
-pub trait Topology: Send + Sync {
+pub trait Topology: Send + Sync + std::fmt::Debug {
     /// Total number of cells across all faces.
     fn cell_count(&self) -> usize;
 
@@ -42,6 +44,7 @@ pub trait Topology: Send + Sync {
 
 /// Classic flat `width x height` board. Indexing matches `Board`:
 /// `CellId(row * width + col)`. Edges have no neighbours.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Flat2D {
     pub width: usize,
     pub height: usize,
