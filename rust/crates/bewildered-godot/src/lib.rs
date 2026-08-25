@@ -1,5 +1,11 @@
 use godot::prelude::*;
-use bewildered_core::{calculate_score, Board, GemKind, MoveOutcome, RuleModifiers, SpecialGem};
+use bewildered_core::{
+    Board, CellId, Cube6Face, Direction, Flat2D, GemKind, MoveOutcome, RuleModifiers, SpecialGem,
+    Topology,
+};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use rand::Rng;
 use bewildered_content::{BlockerKind, Level, Objective};
 use std::collections::HashMap;
 
@@ -18,7 +24,6 @@ pub struct BoardSim {
     collection_target: i32,
     blockers_remaining: i64,
     blocker_target: i32,
-    // (row, col) -> hits remaining. Ice/Crate need multiple hits to clear.
     blocker_hits: HashMap<(usize, usize), i32>,
     cleared: bool,
     failed: bool,
@@ -220,7 +225,7 @@ impl BoardSim {
 
             let gained = {
                 let b = self.board.as_ref().unwrap();
-                calculate_score(outcome, b.combo, &b.rule_modifiers) as i64
+                bewildered_core::calculate_score(outcome, b.combo, &b.rule_modifiers) as i64
             };
             self.score += gained;
 
@@ -572,6 +577,297 @@ impl BoardSim {
     #[func]
     fn get_last_error(&self) -> String {
         self.error_message.clone()
+    }
+}
+
+/// Multi-face cube simulation for the 3D Bewildered mode.
+#[derive(GodotClass)]
+#[class(base=RefCounted, init)]
+pub struct CubeSim {
+    board: Option<Board>,
+    topology: Cube6Face,
+    face_size: i32,
+    error_message: String,
+    base: Base<RefCounted>,
+}
+
+#[godot_api]
+impl CubeSim {
+    #[signal]
+    fn cube_match_resolved(face: i32, cleared_cells: Array<Vector2i>, gem_kind: i32, cascade_depth: i32);
+
+    #[signal]
+    fn cube_special_gem_created(face: i32, pos: Vector2i, kind: i32);
+
+    #[signal]
+    fn cube_echo_charged(face: i32, cells: Array<Vector2i>);
+
+    #[signal]
+    fn cube_echo_detonated(face: i32, cells: Array<Vector2i>, multiplier: f32);
+
+    #[signal]
+    fn antipodal_echo_charged(target_face: i32, cells: Array<Vector2i>);
+
+    #[signal]
+    fn cube_move_rejected(face: i32, ax: i32, ay: i32, bx: i32, by: i32);
+
+    #[signal]
+    fn cube_objective_progress(current: i64, target: i64);
+
+    /// Create a new cube board with the given face size (N x N per face) and seed.
+    /// All 6 faces share the same seed for deterministic generation.
+    #[func]
+    fn new_cube_board(&mut self, face_size: i32, seed: i64) {
+        self.face_size = face_size;
+        self.topology = Cube6Face::new(face_size as usize);
+        let total_cells = self.topology.cell_count();
+
+        let gem_types = vec![
+            GemKind::Circle,
+            GemKind::Triangle,
+            GemKind::Square,
+            GemKind::Diamond,
+        ];
+
+        // Generate a match-free board using the topology
+        let mut gems = Vec::with_capacity(total_cells);
+        for _ in 0..total_cells {
+            gems.push(None);
+        }
+
+        // Fill with match-free gems using topology-aware generation
+        // For now, use a simple approach: fill each face independently
+        let per_face = (face_size * face_size) as usize;
+        for face in 0..6 {
+            let mut rng = StdRng::seed_from_u64(
+                seed as u64 + face as u64 * 10000,
+            );
+            for row in 0..face_size as usize {
+                for col in 0..face_size as usize {
+                    let mut kind = gem_types[rng.gen_range(0..gem_types.len())];
+                    for _ in 0..20 {
+                        let candidate = gem_types[rng.gen_range(0..gem_types.len())];
+                        let idx = self.face_index(face, col as i32, row as i32);
+                        let horiz = col >= 2
+                            && gems[idx - 1].as_ref().map(|g: &bewildered_core::Gem| g.kind) == Some(candidate)
+                            && gems[idx - 2].as_ref().map(|g: &bewildered_core::Gem| g.kind) == Some(candidate);
+                        let vert = row >= 2
+                            && gems[idx - per_face].as_ref().map(|g: &bewildered_core::Gem| g.kind) == Some(candidate)
+                            && gems[idx - 2 * per_face].as_ref().map(|g: &bewildered_core::Gem| g.kind) == Some(candidate);
+                        if !horiz && !vert {
+                            kind = candidate;
+                            break;
+                        }
+                    }
+                    let idx = self.face_index(face, col as i32, row as i32);
+                    gems[idx] = Some(bewildered_core::Gem {
+                        kind,
+                        echo: None,
+                        special: None,
+                        blocker: None,
+                    });
+                }
+            }
+        }
+
+        self.board = Some(Board {
+            gems,
+            width: face_size as usize * 6, // Logical width for Board (not used for cube)
+            height: face_size as usize,
+            combo: 0,
+            gem_types,
+            rng: StdRng::seed_from_u64(seed as u64),
+            resonance_multiplier: 1.0,
+            resonance_stack: 0,
+            rule_modifiers: RuleModifiers::default(),
+            cleared_this_move: Vec::new(),
+            gravity: Direction::Down,
+        });
+    }
+
+    /// Get the cell at (face, x, y). Face in 0..5, x,y in 0..face_size-1.
+    #[func]
+    fn get_face_cell(&self, face: i32, x: i32, y: i32) -> Dictionary {
+        let mut dict = Dictionary::new();
+        let Some(board) = &self.board else {
+            dict.set("empty", true.to_variant());
+            return dict;
+        };
+
+        if face < 0 || face >= 6 || x < 0 || y < 0 || x >= self.face_size || y >= self.face_size {
+            dict.set("empty", true.to_variant());
+            return dict;
+        }
+
+        let idx = self.face_index(face, x, y);
+        if let Some(gem) = board.gems.get(idx).and_then(|g| g.as_ref()) {
+            dict.set("empty", false.to_variant());
+            dict.set("kind", (gem.kind as i32).to_variant());
+            dict.set("has_echo", gem.echo.is_some().to_variant());
+            if let Some(echo) = &gem.echo {
+                dict.set("echo_moves_left", echo.moves_left.to_variant());
+            }
+            let special = match gem.special {
+                None => 0,
+                Some(SpecialGem::Bolt { .. }) => 1,
+                Some(SpecialGem::Prism) => 2,
+                Some(SpecialGem::Nova) => 3,
+            };
+            dict.set("special", special.to_variant());
+        } else {
+            dict.set("empty", true.to_variant());
+        }
+        dict
+    }
+
+    /// Attempt a swap between two adjacent cells on the same face.
+    /// Returns true if the swap was legal and produced matches.
+    #[func]
+    fn try_face_swap(&mut self, face: i32, ax: i32, ay: i32, bx: i32, by: i32) -> bool {
+        if face < 0 || face >= 6 {
+            return false;
+        }
+        if ax < 0 || ay < 0 || bx < 0 || by < 0 || ax >= self.face_size || ay >= self.face_size || bx >= self.face_size || by >= self.face_size {
+            self.emit_move_rejected(face, ax, ay, bx, by);
+            return false;
+        }
+        if (ax - bx).abs() + (ay - by).abs() != 1 {
+            self.emit_move_rejected(face, ax, ay, bx, by);
+            return false;
+        }
+
+        // Compute indices before mutable borrow
+        let fs = self.face_size as usize;
+        let idx_a = face as usize * fs * fs + ay as usize * fs + ax as usize;
+        let idx_b = face as usize * fs * fs + by as usize * fs + bx as usize;
+
+        let board = self.board.as_mut().unwrap();
+
+        if board.gems[idx_a].is_none() || board.gems[idx_b].is_none() {
+            self.emit_move_rejected(face, ax, ay, bx, by);
+            return false;
+        }
+
+        // Simulate swap
+        board.gems.swap(idx_a, idx_b);
+
+        // Check for matches using topology-aware find_line_runs
+        let initial_matches = Self::find_all_matches_cube(&self.topology, board);
+
+        // Check if the swap caused a match involving the swapped cells
+        // Collect all global indices from the matches
+        let mut matched_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let fs = self.face_size as usize;
+        for m in &initial_matches {
+            for (row, col) in &m.cells {
+                let idx = (face as usize) * fs * fs + (*row as usize) * fs + (*col as usize);
+                matched_indices.insert(idx);
+            }
+        }
+        let swap_caused = matched_indices.contains(&idx_a) || matched_indices.contains(&idx_b)
+            || initial_matches.iter().any(|m| m.is_special);
+
+        if initial_matches.is_empty() || !swap_caused {
+            board.gems.swap(idx_a, idx_b);
+            self.emit_move_rejected(face, ax, ay, bx, by);
+            return false;
+        }
+
+        // Process matches
+        let outcome = MoveOutcome::Success {
+            matches: initial_matches,
+            cascades: 1,
+            resonance_multiplier: 1.0,
+            clears_by_depth: vec![],
+        };
+
+        self.handle_cube_success_move(&outcome);
+        true
+    }
+
+    /// Rotate gravity on the active face 90° (clockwise or counter-clockwise).
+    /// The face's grid transposes with gravity always Down in the new orientation.
+    #[func]
+    fn rotate_face_gravity(&mut self, face: i32, clockwise: bool) -> bool {
+        if face < 0 || face >= 6 {
+            return false;
+        }
+        // Delegate to Board's rotate_board for now
+        let outcome = {
+            let board = self.board.as_mut().unwrap();
+            board.rotate_board(clockwise)
+        };
+        matches!(&outcome, MoveOutcome::Success { .. })
+    }
+
+    fn face_index(&self, face: i32, x: i32, y: i32) -> usize {
+        let fs = self.face_size as usize;
+        (face as usize * fs * fs) + (y as usize * fs) + x as usize
+    }
+
+    fn emit_move_rejected(&mut self, face: i32, ax: i32, ay: i32, bx: i32, by: i32) {
+        self.base_mut().emit_signal(
+            "cube_move_rejected",
+            &[
+                face.to_variant(),
+                ax.to_variant(),
+                ay.to_variant(),
+                bx.to_variant(),
+                by.to_variant(),
+            ],
+        );
+    }
+
+    fn find_all_matches_cube(topology: &Cube6Face, board: &Board) -> Vec<bewildered_core::Match> {
+        let gems: Vec<Option<u8>> = board
+            .gems
+            .iter()
+            .map(|g| g.as_ref().map(|gem| gem.kind as u8))
+            .collect();
+        bewildered_core::find_line_runs(topology, &gems, 3)
+            .into_iter()
+            .map(|(cells, kind)| bewildered_core::Match {
+                cells: cells.iter().map(|c| {
+                    let (_, x, y) = topology.coords(*c);
+                    (x as usize, y as usize)
+                }).collect(),
+                kind: match GemKind::try_from(kind as u8) {
+                    Ok(gk) => gk,
+                    Err(_) => GemKind::Circle,
+                },
+                is_special: false,
+                special_type: None,
+            })
+            .collect()
+    }
+
+    fn handle_cube_success_move(&mut self, outcome: &MoveOutcome) {
+        if let MoveOutcome::Success { matches, .. } = outcome {
+            // Emit match signals with face indices
+            for m in matches {
+                let mut cleared_cells = Array::new();
+                let mut face_for_cells = 0;
+                for &(row, col) in &m.cells {
+                    cleared_cells.push(Vector2i::new(col as i32, row as i32));
+                    if let Some(&(first_row, first_col)) = m.cells.first() {
+                        let cell_id = CellId(self.face_index(face_for_cells as i32, first_col as i32, first_row as i32) as u32);
+                        let (f, _, _) = self.topology.coords(cell_id);
+                        face_for_cells = f as i32;
+                    }
+                }
+                if !cleared_cells.is_empty() {
+                    self.base_mut().emit_signal(
+                        "cube_match_resolved",
+                        &[
+                            face_for_cells.to_variant(),
+                            cleared_cells.to_variant(),
+                            (m.kind as i32).to_variant(),
+                            1i32.to_variant(),
+                        ],
+                    );
+                }
+            }
+        }
     }
 }
 

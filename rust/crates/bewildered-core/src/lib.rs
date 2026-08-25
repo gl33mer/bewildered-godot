@@ -46,7 +46,7 @@ impl Direction {
 }
 
 /// Rule modifiers from active relics — threaded through core systems.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RuleModifiers {
     /// Diagonal matches also count (Diagonal Sight relic)
     pub diagonal_matches: bool,
@@ -64,6 +64,41 @@ pub struct RuleModifiers {
     pub extra_moves: u8,
     /// Collection target reduction percentage (Collection Bonus relic)
     pub collection_reduction_pct: u8,
+    /// Topology for antipodal echo shockwaves and other geometry-dependent rules
+    #[serde(skip)]
+    pub topology: Option<Box<dyn Topology>>,
+}
+
+impl Default for RuleModifiers {
+    fn default() -> Self {
+        Self {
+            diagonal_matches: false,
+            fifth_hue: false,
+            echo_extra_moves: 0,
+            corner_cutter: false,
+            greedy_nova: false,
+            score_bonus_pct: 0.0,
+            extra_moves: 0,
+            collection_reduction_pct: 0,
+            topology: None,
+        }
+    }
+}
+
+impl Clone for RuleModifiers {
+    fn clone(&self) -> Self {
+        Self {
+            diagonal_matches: self.diagonal_matches,
+            fifth_hue: self.fifth_hue,
+            echo_extra_moves: self.echo_extra_moves,
+            corner_cutter: self.corner_cutter,
+            greedy_nova: self.greedy_nova,
+            score_bonus_pct: self.score_bonus_pct,
+            extra_moves: self.extra_moves,
+            collection_reduction_pct: self.collection_reduction_pct,
+            topology: None, // Topology is per-board, not cloned
+        }
+    }
 }
 
 impl RuleModifiers {
@@ -107,11 +142,37 @@ impl RuleModifiers {
 
 /// A gem on the board. Tracks its kind, whether it carries an echo charge,
 /// and any special properties (e.g. Bolt, Prism, Nova).
+/// Optional blocker occupying this cell (Stone or Ice).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Gem {
     pub kind: GemKind,
     pub echo: Option<EchoCharge>,
     pub special: Option<SpecialGem>,
+    pub blocker: Option<Blocker>,
+}
+
+/// Durable blockers that occupy cells and affect gravity/matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Blocker {
+    /// Indestructible stone — falls with gravity, cannot be matched.
+    Stone,
+    /// Ice encasing a gem — immovable (immune to gravity) until adjacent
+    /// match breaks it, then reveals the encased gem.
+    Ice { layers: u8 },
+}
+
+impl Blocker {
+    pub fn is_immovable(&self) -> bool {
+        matches!(self, Blocker::Ice { .. })
+    }
+
+    pub fn hit(&self) -> Option<Blocker> {
+        match self {
+            Blocker::Stone => None, // Stone never breaks
+            Blocker::Ice { layers: 1 } => None, // Last layer breaks, reveals gem
+            Blocker::Ice { layers } => Some(Blocker::Ice { layers: layers - 1 }),
+        }
+    }
 }
 
 /// Special gem types created by matches of 4+.
@@ -230,7 +291,7 @@ pub struct Board {
     /// Active gem types for spawning.
     pub gem_types: Vec<GemKind>,
     /// RNG for deterministic spawning.
-    rng: StdRng,
+    pub rng: StdRng,
     /// Current resonance multiplier from echo detonations (1.0 = no resonance).
     pub resonance_multiplier: f32,
     /// Count of echoes that detonated in the current move (for stacking).
@@ -290,6 +351,7 @@ impl Board {
                 kind,
                 echo: None,
                 special: None,
+                blocker: None,
             }));
         }
 
@@ -335,7 +397,7 @@ impl Board {
     pub fn set_gem(&mut self, row: usize, col: usize, kind: GemKind) {
         if row < self.height && col < self.width {
             let idx = self.idx(row, col);
-            self.gems[idx] = Some(Gem { kind, echo: None, special: None });
+            self.gems[idx] = Some(Gem { kind, echo: None, special: None, blocker: None });
         }
     }
 
@@ -628,6 +690,13 @@ impl Board {
                             }
                         }
                     }
+
+                    // Antipodal Resonance Shockwave: charge the cell on the exact
+                    // opposite face (Cube6Face) or do nothing (Flat2D).
+                    // Use the first cell of the match as the detonation origin.
+                    if let Some(&(det_r, det_c)) = m.cells.first() {
+                        self.charge_antipodal_echo(det_r, det_c);
+                    }
                 }
 
                 // Handle special gem activation
@@ -673,11 +742,12 @@ impl Board {
             }
 
             // Clear extra cells from detonations/specials
-            for (r, c) in extra_clear_cells {
-                if let Some(kind) = self.gem(r, c).map(|g| g.kind) {
-                    self.cleared_this_move.push((r, c, kind));
-                    round_clears.push((r, c, kind));
-                    self.remove_gem(r, c);
+            for (r, c) in &extra_clear_cells {
+                let (rr, cc) = (*r, *c);
+                if let Some(kind) = self.gem(rr, cc).map(|g| g.kind) {
+                    self.cleared_this_move.push((rr, cc, kind));
+                    round_clears.push((rr, cc, kind));
+                    self.remove_gem(rr, cc);
                 }
             }
 
@@ -694,6 +764,17 @@ impl Board {
                 }
             }
 
+            // Break ice blockers adjacent to any cleared cell in this cascade step
+            for m in &current_matches {
+                for &(r, c) in &m.cells {
+                    self.hit_adjacent_ice(r, c);
+                }
+            }
+            // Also hit ice adjacent to extra clear cells from specials/detonations
+            for (r, c) in &extra_clear_cells {
+                self.hit_adjacent_ice(*r, *c);
+            }
+
             clears_by_depth.push(round_clears);
 
             // Persist special gems created by this cascade step: place the
@@ -708,6 +789,7 @@ impl Board {
                         kind: m.kind,
                         echo: None,
                         special: Some(special),
+                        blocker: None,
                     });
                 }
             }
@@ -787,6 +869,7 @@ impl Board {
     }
 
     /// Compact gems within each column toward the top (Up) or bottom (Down).
+    /// Stone blockers fall with gravity; Ice blockers are immovable until broken.
     fn apply_gravity_vertical(&mut self, dir: Direction) {
         for col in 0..self.width {
             let mut write_row = if dir == Direction::Down {
@@ -801,17 +884,21 @@ impl Board {
             };
             for read_row in row_iter {
                 let read_idx = self.idx(read_row, col);
-                if self.gems[read_idx].is_some() {
-                    if read_row != write_row {
-                        let write_idx = self.idx(write_row, col);
-                        self.gems[write_idx] = self.gems[read_idx].take();
-                    }
-                    if dir == Direction::Down {
-                        if write_row > 0 {
-                            write_row -= 1;
+                if let Some(gem) = &self.gems[read_idx] {
+                    // Check if this cell has an immovable blocker
+                    let immovable = gem.blocker.as_ref().map(|b| b.is_immovable()).unwrap_or(false);
+                    if !immovable {
+                        if read_row != write_row {
+                            let write_idx = self.idx(write_row, col);
+                            self.gems[write_idx] = self.gems[read_idx].take();
                         }
-                    } else {
-                        write_row += 1;
+                        if dir == Direction::Down {
+                            if write_row > 0 {
+                                write_row -= 1;
+                            }
+                        } else {
+                            write_row += 1;
+                        }
                     }
                 }
             }
@@ -819,6 +906,7 @@ impl Board {
     }
 
     /// Compact gems within each row toward the left (Left) or right (Right).
+    /// Stone blockers fall with gravity; Ice blockers are immovable until broken.
     fn apply_gravity_horizontal(&mut self, dir: Direction) {
         for row in 0..self.height {
             let mut write_col = if dir == Direction::Right {
@@ -833,17 +921,20 @@ impl Board {
             };
             for read_col in col_iter {
                 let read_idx = self.idx(row, read_col);
-                if self.gems[read_idx].is_some() {
-                    if read_col != write_col {
-                        let write_idx = self.idx(row, write_col);
-                        self.gems[write_idx] = self.gems[read_idx].take();
-                    }
-                    if dir == Direction::Right {
-                        if write_col > 0 {
-                            write_col -= 1;
+                if let Some(gem) = &self.gems[read_idx] {
+                    let immovable = gem.blocker.as_ref().map(|b| b.is_immovable()).unwrap_or(false);
+                    if !immovable {
+                        if read_col != write_col {
+                            let write_idx = self.idx(row, write_col);
+                            self.gems[write_idx] = self.gems[read_idx].take();
                         }
-                    } else {
-                        write_col += 1;
+                        if dir == Direction::Right {
+                            if write_col > 0 {
+                                write_col -= 1;
+                            }
+                        } else {
+                            write_col += 1;
+                        }
                     }
                 }
             }
@@ -861,7 +952,57 @@ impl Board {
                         kind: self.gem_types[kind_idx],
                         echo: None,
                         special: None,
+                        blocker: None,
                     });
+                }
+            }
+        }
+    }
+
+    /// Hit ice blockers adjacent to the given cell (orthogonal neighbors).
+    /// Returns the number of ice layers broken.
+    fn hit_adjacent_ice(&mut self, row: usize, col: usize) -> usize {
+        let mut broken = 0;
+        let neighbors = [
+            (row.wrapping_sub(1), col),
+            (row + 1, col),
+            (row, col.wrapping_sub(1)),
+            (row, col + 1),
+        ];
+        for (nr, nc) in neighbors {
+            if nr < self.height && nc < self.width {
+                let idx = self.idx(nr, nc);
+                if let Some(gem) = &mut self.gems[idx] {
+                    if let Some(Blocker::Ice { layers }) = gem.blocker {
+                        if layers == 1 {
+                            gem.blocker = None; // Ice breaks, reveals gem
+                        } else {
+                            gem.blocker = Some(Blocker::Ice { layers: layers - 1 });
+                        }
+                        broken += 1;
+                    }
+                }
+            }
+        }
+        broken
+    }
+
+    /// Charge the antipodal cell of an echo detonation using the board's topology.
+    /// For Flat2D, does nothing. For Cube6Face, charges the opposite face cell.
+    pub fn charge_antipodal_echo(&mut self, row: usize, col: usize) {
+        if let Some(topology) = &self.rule_modifiers.topology {
+            let cell = CellId(self.idx(row, col) as u32);
+            if let Some(anti_cell) = topology.antipode(cell) {
+                let anti_idx = anti_cell.0 as usize;
+                if anti_idx < self.gems.len() {
+                    if let Some(gem) = &mut self.gems[anti_idx] {
+                        // Add or extend echo charge on the antipodal cell
+                        if let Some(echo) = &mut gem.echo {
+                            echo.moves_left = echo.moves_left.max(2); // At least 2 moves for antipodal
+                        } else {
+                            gem.echo = Some(EchoCharge::with_duration(2));
+                        }
+                    }
                 }
             }
         }

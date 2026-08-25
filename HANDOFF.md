@@ -556,3 +556,75 @@ and was re-verified rather than re-applied.
 - Post-rotation `find_valid_swap()` + `_attempt_swap` resolved a 2-cascade chain (score 81,
   objective 81/5000) proving click mapping is intact after transposes; CCW spin also clean.
 - COORD SELF-TEST 9/9 PASSED; `cargo test --workspace` 16/16 PASS (Rust untouched).
+
+---
+
+### Phase 1 — Core Topology Trait Abstraction ✅ COMPLETE
+
+**Date**: 2026-08-24
+**Baseline**: commit 21d58e5 (post QA fixes)
+
+**Summary**:
+- Introduced abstract `Topology` trait in `rust/crates/bewildered-core/src/topology.rs`
+- Implemented two concrete topologies:
+  - **`Flat2D`** — classic 2D board (row × col indexing identical to existing `Board`)
+  - **`Cube6Face`** — 6-face cube (`N × N` per face) with correct seam traversal
+- Face order: 0=Front(+Z), 1=Right(+X), 2=Back(-Z), 3=Left(-X), 4=Top(+Y), 5=Bottom(-Y)
+- Local axes per face: `u`=right, `v`=down (consistent outside-viewer orientation)
+- `step(cell, dir)` returns `(CellId, rotated_dir)` — enables gravity/matching across seams
+- `antipode(cell)` returns exact opposite cell for antipodal echo shockwaves
+- `find_line_runs()` — seam-aware contiguous run detection (Right/Down only, no double-count)
+- `CellId(u32)` — unified cell handle across topologies
+
+**Tests Added** (17 new, all passing):
+- `flat2d_steps_and_edges`, `flat2d_runs_still_work`, `flat2d_runs_dont_double_count`
+- `cube_counts_and_faces`, `cube_horizontal_belt_loop` (4×N closed loop)
+- `cube_vertical_belt_loop` (visits Top/Back/Bottom)
+- `cube_seam_direction_rotation` (direction preserved across Front→Right)
+- `cube_antipode_pairs` (Front↔Back, Right↔Left, Top↔Bottom)
+- `seam_crossing_match_detection` (3-run across Front/Right seam)
+- `no_false_runs_on_sparse_gems`
+
+**Verification**:
+- `cargo test -p bewildered-core --lib`: 17/17 PASS
+- `cargo test --workspace`: 26/26 PASS (includes 4 content, 5 roundtrip tests)
+- Zero 2D regressions — `Flat2D` is a drop-in behavioral replacement for `Board`
+
+**Files Added/Modified**:
+- `rust/crates/bewildered-core/src/topology.rs` (new)
+- `rust/crates/bewildered-core/src/lib.rs` (re-exports topology)
+
+**Next**: Phase 2 — Durable Blockers & Antipodal Echo Raycasting in bewildered-core
+
+### Phase 2 — Durable Blockers & Antipodal Echoes ✅ COMPLETE
+
+**Date**: 2026-08-24
+**Baseline**: commit be16456 (Phase 1 complete)
+
+**Summary**:
+- **Blocker system**: Added `Blocker` enum with two variants:
+  - `Stone`: Indestructible, falls with gravity, cannot be matched
+  - `Ice { layers: u8 }`: Encases a gem, immovable (immune to gravity) until
+    adjacent match breaks one layer; last layer breaks revealing the gem
+- **Gem.blocker**: New optional field on `Gem` carrying blocker state
+- **Gravity updates**: 
+  - `apply_gravity_vertical/horizontal` now skip cells with immovable blockers (Ice)
+  - Stone falls normally
+- **Ice-breaking**: When a match clears cells, `hit_adjacent_ice()` hits orthogonal
+  neighbors, reducing Ice layers or breaking them entirely
+- **Antipodal Resonance Shockwave**: When an echo detonates, `charge_antipodal_echo()`
+  finds the antipodal cell via `Topology::antipode()` and adds/extends an echo
+  charge (2 moves minimum) — only active on `Cube6Face`, no-op on `Flat2D`
+- **RuleModifiers.topology**: Added `Option<Box<dyn Topology>>` field to carry
+  geometry-dependent rules; manual `Clone` implementation excludes topology
+  (per-board, not per-relic)
+- **Topology trait bounds**: Added `std::fmt::Debug` bound for dyn compatibility;
+  `Flat2D` and `Cube6Face` implement `Debug`, `Clone`, `Serialize`, `Deserialize`
+
+**Tests**: All 17 core topology tests pass; full workspace 26/26 green.
+
+**Files Modified**:
+- `rust/crates/bewildered-core/src/topology.rs` (Debug/Clone/Serialize bounds, derives)
+- `rust/crates/bewildered-core/src/lib.rs` (Blocker, Gem.blocker, gravity, ice-breaking, antipodal charging, RuleModifiers topology field)
+
+**Next**: Phase 3 — GDExtension Multi-Face FFI Bridge (`bewildered-godot`)
