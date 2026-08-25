@@ -120,68 +120,68 @@ const ADJ: [[AdjFn; 4]; 6] = [
     // Face 0: Front (+Z)  u=+X, v=-Y
     [
         // Up    (v=0):      -> Face 4 (Top),    enter at v=0 (z=N),      dir Down
-        |x, y, n| (4, x, 0, Direction::Down),
+        |x, _y, _n| (4, x, 0, Direction::Down),
         // Down  (v=n-1):    -> Face 5 (Bottom), enter at v=n-1 (z=N),    dir Up
-        |x, y, n| (5, x, n - 1, Direction::Up),
+        |x, _y, n| (5, x, n - 1, Direction::Up),
         // Left  (u=0):      -> Face 3 (Left),   enter at u=n-1 (z=N),    dir Left
-        |x, y, n| (3, n - 1, y, Direction::Left),
+        |_x, y, n| (3, n - 1, y, Direction::Left),
         // Right (u=n-1):    -> Face 1 (Right),  enter at u=0 (z=N),      dir Right
-        |x, y, n| (1, 0, y, Direction::Right),
+        |_x, y, _n| (1, 0, y, Direction::Right),
     ],
     // Face 1: Right (+X)  u=-Z, v=-Y
     [
         // Up    (v=0):      -> Face 4 (Top),    enter at u=n-1 (x=N),    dir Left
-        |x, y, n| (4, n - 1, x, Direction::Left),
+        |x, _y, n| (4, n - 1, x, Direction::Left),
         // Down  (v=n-1):    -> Face 5 (Bottom), enter at u=n-1 (x=N),    dir Left
-        |x, y, n| (5, n - 1, n - 1 - x, Direction::Left),
+        |x, _y, n| (5, n - 1, n - 1 - x, Direction::Left),
         // Left  (u=0, z=N): -> Face 0 (Front),  enter at u=n-1 (x=N),    dir Left
-        |x, y, n| (0, n - 1, y, Direction::Left),
+        |_x, y, n| (0, n - 1, y, Direction::Left),
         // Right (u=n-1,z=0):-> Face 2 (Back),   enter at u=0 (x=N),      dir Right
-        |x, y, n| (2, 0, y, Direction::Right),
+        |_x, y, _n| (2, 0, y, Direction::Right),
     ],
     // Face 2: Back (-Z)  u=-X, v=-Y
     [
-        // Up    (v=0):      -> Face 4 (Top),    enter at v=n-1 (z=0),    dir Down
-        |x, y, n| (4, n - 1 - x, n - 1, Direction::Down),
-        // Down  (v=n-1):    -> Face 5 (Bottom), enter at v=0 (z=0),      dir Up
-        |x, y, n| (5, n - 1 - x, 0, Direction::Up),
+        // Up    (v=0):      -> Face 4 (Top),    enter at v=n-1 (z=0),    dir Up
+        |x, _y, n| (4, n - 1 - x, n - 1, Direction::Up),
+        // Down  (v=n-1):    -> Face 5 (Bottom), enter at v=0 (z=0),      dir Down
+        |x, _y, n| (5, n - 1 - x, 0, Direction::Down),
         // Left  (u=0,x=N):  -> Face 1 (Right),  enter at u=n-1 (z=0),    dir Left
-        |x, y, n| (1, n - 1, y, Direction::Left),
+        |_x, y, n| (1, n - 1, y, Direction::Left),
         // Right (u=n-1,x=0):-> Face 3 (Left),   enter at u=0 (z=0),      dir Right
-        |x, y, n| (3, 0, y, Direction::Right),
+        |_x, y, _n| (3, 0, y, Direction::Right),
     ],
     // Face 3: Left (-X)  u=+Z, v=-Y
     [
         // Up    (v=0):      -> Face 4 (Top),    enter at u=0 (x=0),      dir Right
-        |x, y, n| (4, 0, n - 1 - x, Direction::Right),
+        |x, _y, n| (4, 0, n - 1 - x, Direction::Right),
         // Down  (v=n-1):    -> Face 5 (Bottom), enter at u=0 (x=0),      dir Right
-        |x, y, n| (5, 0, x, Direction::Right),
+        |x, _y, _n| (5, 0, x, Direction::Right),
         // Left  (u=0,z=0):  -> Face 2 (Back),   enter at u=n-1 (x=0),    dir Left
-        |x, y, n| (2, n - 1, y, Direction::Left),
+        |_x, y, n| (2, n - 1, y, Direction::Left),
         // Right (u=n-1,z=N):-> Face 0 (Front),  enter at u=0 (x=0),      dir Right
-        |x, y, n| (0, 0, y, Direction::Right),
+        |_x, y, _n| (0, 0, y, Direction::Right),
     ],
     // Face 4: Top (+Y)  u=+X, v=-Z
     [
         // Up    (v=0, z=N): -> Face 0 (Front),  enter at v=0 (y=N),      dir Down
-        |x, y, n| (0, x, 0, Direction::Down),
+        |x, _y, _n| (0, x, 0, Direction::Down),
         // Down  (v=n-1,z=0):-> Face 2 (Back),   enter at v=0 (y=N),      dir Down
-        |x, y, n| (2, n - 1 - x, n - 1, Direction::Down),
+        |x, _y, n| (2, n - 1 - x, 0, Direction::Down),
         // Left  (u=0,x=0):  -> Face 3 (Left),   enter at u=0 (x=0),      dir Right
-        |x, y, n| (3, 0, n - 1 - x, Direction::Right),
+        |x, _y, n| (3, 0, n - 1 - x, Direction::Right),
         // Right (u=n-1,x=N):-> Face 1 (Right),  enter at u=0 (x=N),      dir Right
-        |x, y, n| (1, 0, n - 1 - x, Direction::Right),
+        |x, _y, n| (1, 0, n - 1 - x, Direction::Right),
     ],
     // Face 5: Bottom (-Y)  u=+X, v=+Z
     [
         // Up    (v=0, z=0): -> Face 2 (Back),   enter at v=n-1 (y=0),    dir Up
-        |x, y, n| (2, n - 1 - x, n - 1, Direction::Up),
+        |x, _y, n| (2, n - 1 - x, n - 1, Direction::Up),
         // Down  (v=n-1,z=N):-> Face 0 (Front),  enter at v=n-1 (y=1),    dir Up
-        |x, y, n| (0, x, n - 1, Direction::Up),
+        |x, _y, n| (0, x, n - 1, Direction::Up),
         // Left  (u=0,x=0):  -> Face 3 (Left),   enter at v=n-1 (y=0),    dir Down
-        |x, y, n| (3, 0, n - 1, Direction::Down),
+        |_x, _y, n| (3, 0, n - 1, Direction::Down),
         // Right (u=n-1,x=N):-> Face 1 (Right),  enter at v=n-1 (y=0),    dir Down
-        |x, y, n| (1, 0, n - 1, Direction::Down),
+        |_x, _y, n| (1, 0, n - 1, Direction::Down),
     ],
 ];
 
@@ -392,24 +392,23 @@ mod tests {
         let n = 4;
         let t = Cube6Face::new(n);
         // Start at Face 0 bottom row (y = n-1), middle column (x=1), going Up.
-        // This traces Front -> Top -> Back -> Bottom -> Front vertical belt.
+        // This traces Front -> Top -> Back -> Bottom -> Front vertical belt:
+        // N cells per face, closing after exactly 4*N steps.
         let start = CellId(((n - 1) * n + 1) as u32); // face 0, x=1, y=n-1
-        let mut faces = vec![t.face_of(start)];
         let mut cur = start;
         let mut dir = Direction::Up;
-        // Walk 4*n steps and verify we visit all 4 vertical faces
-        // without falling off (step always returns Some)
-        for _ in 0..(4 * n) {
-            let (next, ndir) = t.step(cur, dir).unwrap();
+        for i in 1..=(4 * n) {
+            let (next, ndir) = t
+                .step(cur, dir)
+                .unwrap_or_else(|| panic!("vertical step {} fell off", i));
             cur = next;
             dir = ndir;
-            faces.push(t.face_of(cur));
         }
-        // Verify the vertical belt visits Top(4), Back(2), Bottom(5)
-        assert!(faces.contains(&4) && faces.contains(&2) && faces.contains(&5),
-                "vertical belt must visit Top, Back, Bottom; got {:?}", faces);
-        // Verify we never fell off (always got a valid step)
-        assert_eq!(faces.len(), 4 * n + 1);
+        assert_eq!(
+            cur, start,
+            "vertical belt walk must return to exact start cell after 4*N steps"
+        );
+        assert_eq!(dir, Direction::Up, "direction must be restored to Up");
     }
 
     #[test]
