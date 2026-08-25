@@ -7,8 +7,10 @@ extends Node3D
 ## All rules live in Rust (CubeSim); this script is presentation + input only.
 
 const CELL := 1.0
-const FACE_SIZE := 6
 const BOARD_SEED := 20260825
+
+## Cells per face edge (4..10). Rebuild with keys 1-4 in game.
+@export var face_size: int = 6
 
 # Face conventions — MUST match bewildered-core topology.rs:
 # 0=Front(+Z) 1=Right(+X) 2=Back(-Z) 3=Left(-X) 4=Top(+Y) 5=Bottom(-Y)
@@ -51,28 +53,51 @@ var plate_material: StandardMaterial3D
 var selected := {} # {face, x, y}
 var busy := false
 var status_label: Label
+var faces_root: Node3D
+
+const ANTIPODE_FACE := [2, 3, 0, 1, 5, 4]
 
 
 func _ready() -> void:
-	sim = CubeSim.new()
-	sim.new_cube_board(FACE_SIZE, BOARD_SEED)
-
 	_build_environment()
 	_build_materials()
 
 	camera = CubeSnapCamera.new()
 	add_child(camera)
 
-	for f in 6:
-		_build_face(f)
 	_build_hud()
 
-	_refresh_all()
+	_start_chamber(face_size)
 
+
+## (Re)build the whole chamber for a face size (4..10). Keys 1-4 switch live.
+func _start_chamber(n: int) -> void:
+	face_size = clampi(n, 4, 10)
+	if faces_root:
+		faces_root.queue_free()
+	if _refresh_timer:
+		_refresh_timer.stop()
+	busy = false
+	selected = {}
+	gem_nodes.clear()
+	holders.clear()
+	rest_transforms.clear()
+
+	sim = CubeSim.new()
+	sim.new_cube_board(face_size, BOARD_SEED)
 	sim.cube_match_resolved.connect(_on_match_resolved)
 	sim.cube_echo_detonated.connect(_on_echo_detonated)
 	sim.antipodal_echo_charged.connect(_on_antipodal_charged)
 	sim.cube_special_gem_created.connect(_on_special_created)
+
+	faces_root = Node3D.new()
+	faces_root.name = "Faces"
+	add_child(faces_root)
+	for f in 6:
+		_build_face(f)
+
+	camera.set_distance(2.35 * face_size + 1.4)
+	_refresh_all()
 
 
 # ---------------------------------------------------------------- building --
@@ -141,18 +166,18 @@ func _build_materials() -> void:
 
 
 func _build_face(f: int) -> void:
-	var half := FACE_SIZE * CELL * 0.5
+	var half := face_size * CELL * 0.5
 	var holder := Node3D.new()
 	holder.name = "Face%d" % f
 	var basis := Basis(U_AXES[f], V_AXES[f], NORMALS[f])
 	holder.transform = Transform3D(basis, NORMALS[f] * half)
-	add_child(holder)
+	faces_root.add_child(holder)
 	holders.append(holder)
 	rest_transforms.append(holder.transform)
 
 	var plate := MeshInstance3D.new()
 	var plate_mesh := BoxMesh.new()
-	plate_mesh.size = Vector3(FACE_SIZE * CELL, FACE_SIZE * CELL, 0.16)
+	plate_mesh.size = Vector3(face_size * CELL, face_size * CELL, 0.16)
 	plate.mesh = plate_mesh
 	plate.material_override = plate_material
 	plate.position = Vector3(0, 0, -0.11)
@@ -162,14 +187,14 @@ func _build_face(f: int) -> void:
 	body.set_meta("face_id", f)
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(FACE_SIZE * CELL, FACE_SIZE * CELL, 0.3)
+	box.size = Vector3(face_size * CELL, face_size * CELL, 0.3)
 	shape.shape = box
 	shape.position = Vector3(0, 0, -0.05)
 	body.add_child(shape)
 	holder.add_child(body)
 
-	for y in FACE_SIZE:
-		for x in FACE_SIZE:
+	for y in face_size:
+		for x in face_size:
 			var gem := MeshInstance3D.new()
 			var mesh := BoxMesh.new()
 			mesh.size = Vector3(CELL * 0.84, CELL * 0.84, 0.18)
@@ -199,7 +224,7 @@ func _build_hud() -> void:
 	layer.add_child(status_label)
 
 	var hint := Label.new()
-	hint.text = "A/D turn  ·  W/S pitch  ·  Q/E tumble face  ·  Click gem, click adjacent to swap"
+	hint.text = "A/D turn  ·  W/S pitch  ·  Q/E tumble  ·  Click swap  ·  1-4 board size (4/6/8/10)"
 	hint.position = Vector2(16, 44)
 	hint.add_theme_font_size_override("font_size", 15)
 	hint.modulate = Color(1, 1, 1, 0.75)
@@ -207,7 +232,7 @@ func _build_hud() -> void:
 
 
 func _cell_local(x: int, y: int) -> Vector3:
-	var c := (FACE_SIZE - 1) * 0.5
+	var c := (face_size - 1) * 0.5
 	return Vector3((x - c) * CELL, (y - c) * CELL, 0.09)
 
 
@@ -251,8 +276,8 @@ func _refresh_cell(f: int, x: int, y: int) -> void:
 
 func _refresh_all() -> void:
 	for f in 6:
-		for y in FACE_SIZE:
-			for x in FACE_SIZE:
+		for y in face_size:
+			for x in face_size:
 				_refresh_cell(f, x, y)
 
 
@@ -260,8 +285,9 @@ func _refresh_all() -> void:
 
 var _refresh_timer: Timer
 
-func _on_match_resolved(face: int, cleared_cells: Array, _gem_kind: int, _cascade_depth: int) -> void:
+func _on_match_resolved(face: int, cleared_cells: Array, gem_kind: int, _cascade_depth: int) -> void:
 	# Cleared-cell coordinates are face-local per the FFI contract.
+	var color: Color = KIND_COLORS[gem_kind % 4]
 	for v in cleared_cells:
 		var pos: Vector2i = v
 		var key := Vector3i(face, pos.x, pos.y)
@@ -270,13 +296,96 @@ func _on_match_resolved(face: int, cleared_cells: Array, _gem_kind: int, _cascad
 			var tw := create_tween()
 			tw.tween_property(gem, "scale", Vector3.ONE * 0.02, CLEAR_DURATION) \
 				.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		_spawn_shatter(face, pos, color)
 	_schedule_refresh()
+
+
+## One-shot gem shatter burst, blowing out normal to the face plane.
+func _spawn_shatter(face: int, pos: Vector2i, color: Color) -> void:
+	if face < 0 or face >= 6:
+		return
+	var p := CPUParticles3D.new()
+	p.one_shot = true
+	p.emitting = true
+	p.explosiveness = 1.0
+	p.amount = 14
+	p.lifetime = 0.55
+	p.local_coords = true
+	p.direction = Vector3(0, 0, 1)
+	p.spread = 65.0
+	p.initial_velocity_min = 1.6
+	p.initial_velocity_max = 3.4
+	p.gravity = Vector3(0, 0, -5.0)
+	p.scale_amount_min = 0.5
+	p.scale_amount_max = 1.0
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(0.16, 0.16)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.emission_enabled = true
+	m.emission = color
+	m.emission_energy_multiplier = 1.2
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material = m
+	p.mesh = mesh
+	p.position = _cell_local(pos.x, pos.y) + Vector3(0, 0, 0.1)
+	holders[face].add_child(p)
+	get_tree().create_timer(1.1).timeout.connect(p.queue_free)
+
+
+## Antipodal Resonance Beam: energy lance from a detonated cell through the
+## cube center, striking the exact opposite face cell.
+func _spawn_antipodal_beam(origin_face: int, pos: Vector2i) -> void:
+	if origin_face < 0 or origin_face >= 6:
+		return
+	var target_face: int = ANTIPODE_FACE[origin_face]
+	var target_pos := pos
+	if origin_face <= 3:
+		target_pos = Vector2i(face_size - 1 - pos.x, face_size - 1 - pos.y)
+	var start := holders[origin_face].to_global(_cell_local(pos.x, pos.y))
+	var end := holders[target_face].to_global(_cell_local(target_pos.x, target_pos.y))
+	# Push endpoints slightly past the surface so the lance visibly enters/exits.
+	start += NORMALS[origin_face] * 0.45
+	end += NORMALS[target_face] * 0.45
+
+	var beam := MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.height = start.distance_to(end)
+	mesh.top_radius = 0.085
+	mesh.bottom_radius = 0.085
+	beam.mesh = mesh
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.5, 0.7, 1.0, 0.85)
+	m.emission_enabled = true
+	m.emission = Color(0.45, 0.65, 1.0)
+	m.emission_energy_multiplier = 3.0
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	# X-ray: the lance phases through the cube body, always visible.
+	m.no_depth_test = true
+	m.render_priority = 10
+	beam.material_override = m
+	# Extra render priority on the geometry instance too.
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(beam)
+	beam.global_position = (start + end) * 0.5
+	beam.global_transform.basis = Basis(Quaternion(Vector3.UP, (end - start).normalized()))
+
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.55)
+	tw.tween_property(beam, "scale", Vector3(0.15, 1.0, 0.15), 0.55)
+	tw.chain().tween_callback(beam.queue_free)
+
+	_spawn_shockwave(target_face, target_pos, Color(0.45, 0.65, 1.0))
 
 
 func _on_echo_detonated(face: int, cells: Array, multiplier: float) -> void:
 	for v in cells:
 		var pos: Vector2i = v
 		_spawn_shockwave(face, pos, Color(1.0, 0.85, 0.25))
+		_spawn_antipodal_beam(face, pos)
 	_update_status("Echo detonation ×%.1f" % multiplier)
 
 
@@ -352,6 +461,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_S, KEY_DOWN: _try_pitch(false)
 			KEY_Q: _try_tumble(false)
 			KEY_E: _try_tumble(true)
+			KEY_1: _start_chamber(4)
+			KEY_2: _start_chamber(6)
+			KEY_3: _start_chamber(8)
+			KEY_4: _start_chamber(10)
 	elif event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		_handle_click(event.position)
@@ -490,8 +603,8 @@ func _pick_face_cell(screen_pos: Vector2) -> Dictionary:
 		return {}
 	var face: int = body.get_meta("face_id")
 	var local := holders[face].to_local(result.position)
-	var x := clampi(int(floor(local.x / CELL + FACE_SIZE * 0.5)), 0, FACE_SIZE - 1)
-	var y := clampi(int(floor(local.y / CELL + FACE_SIZE * 0.5)), 0, FACE_SIZE - 1)
+	var x := clampi(int(floor(local.x / CELL + face_size * 0.5)), 0, face_size - 1)
+	var y := clampi(int(floor(local.y / CELL + face_size * 0.5)), 0, face_size - 1)
 	return {"face": face, "x": x, "y": y}
 
 
@@ -502,6 +615,8 @@ func _active_face_id() -> int:
 func _update_status(text: String) -> void:
 	if status_label:
 		status_label.text = text
+		if text != "":
+			_transient_until = Time.get_ticks_msec() + 2200
 
 
 func _process(_delta: float) -> void:
@@ -510,10 +625,13 @@ func _process(_delta: float) -> void:
 
 
 var _last_face_name := ""
+var _transient_until := 0
 
 func _update_status_label_if_idle(face_name: String) -> void:
 	if busy or status_label == null:
 		return
+	if Time.get_ticks_msec() < _transient_until:
+		return # let transient messages (echo/reject) linger briefly
 	var wanted := "Active face: %s" % face_name
 	if _last_face_name != wanted:
 		_last_face_name = wanted

@@ -29,6 +29,12 @@ func is_turning() -> bool:
 	return _tween != null and _tween.is_valid() and _tween.is_running()
 
 
+## Adjust orbit distance (dynamic scaling for variable face sizes).
+func set_distance(d: float) -> void:
+	distance = maxf(d, 3.0)
+	_apply()
+
+
 ## Yaw one 90-degree step. dir > 0 cycles the viewed face Front -> Right ->
 ## Back -> Left; dir < 0 goes back.
 func turn_yaw(dir: int) -> void:

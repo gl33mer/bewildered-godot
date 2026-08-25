@@ -779,3 +779,32 @@ at `~/Projects/BewilderedGodot/bewildered` (old editor + uncommitted Phase-4 exp
 closed; all work continues from `~/Projects/BewilderedGodot_OpenCode`.
 
 **Next**: Phase 5 — variable grid scaling (4×4–10×10) + GPUParticles3D juice + antipodal beam.
+
+### Phase 5 — Variable Grid Scaling & 3D Juice ✅ COMPLETE
+
+**Date**: 2026-08-25
+**Baseline**: Phase 4 commit
+
+**Dynamic scaling** (`scripts/cube_main.gd`):
+- `face_size` is now an exported property (4..10); the whole chamber rebuilds via
+  `_start_chamber(n)` — new sim, faces, gems, and camera distance (`2.35·N + 1.4`)
+- Keys **1/2/3/4** switch board size live (4×4, 6×6, 8×8, 10×10)
+- Faces now live under a dedicated `Faces` root so rebuilds free cleanly
+- Verified live: 6→10 (600 gems, camera 24.9), 6→8 (384 gems) with tumble + swap still working
+
+**3D juice**:
+- **Gem shatter** (`_spawn_shatter`): one-shot `CPUParticles3D` burst per cleared cell,
+  blowing out along the face normal (holder-local +Z), gem-kind colored, emissive billboard
+  quads, auto-freed
+- **Antipodal Resonance Beam** (`_spawn_antipodal_beam`): on every echo detonation, an energy
+  lance fires from the origin cell through the cube center to the exact antipodal cell —
+  emissive cylinder with x-ray rendering (`no_depth_test` + render priority) so it visibly
+  phases through the cube body, endpoints pushed past the surface, strike shockwave on the
+  target face. Verified rendering live (x-ray lance visible over the Front face).
+- Transient HUD messages (echo/reject/special) now linger 2.2s instead of being instantly
+  overwritten by the active-face label
+
+**Verification**: `cargo test --workspace` 39/39 PASS, 0 warnings; live MCP checks for
+scaling, tumble at 8×8, board fullness, beam/shatter node lifecycle, no runtime errors.
+
+**Next**: Phase 6 — Roguelike Descent loop & relic drafting.
