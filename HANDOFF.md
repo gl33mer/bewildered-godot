@@ -671,3 +671,57 @@ and was re-verified rather than re-applied.
 **Verification**: `cargo test --workspace`: 24 core + 4 content + 5 roundtrip = **33/33 PASS**.
 
 **Next**: Phase 3 — GDExtension CubeSim FFI bridge rebuilt on a real core-side CubeBoard.
+
+### Phase 3 — CubeBoard Core + CubeSim FFI Rewrite ✅ COMPLETE
+
+**Date**: 2026-08-25
+**Baseline**: Step 0 merge commit
+
+**Summary**:
+The remote "Phase 3" CubeSim was non-functional: swaps were validated but matched gems were
+never cleared or refilled (a fake `MoveOutcome` was built purely for signals), match detection
+discarded face information from `CellId`s, match-free generation indexed rows by whole-face
+stride (`idx - per_face` instead of `idx - fs`), `rotate_face_gravity` delegated to
+`Board::rotate_board` on a fake 6N×N board, and echoes/antipodes/blockers/cascades were absent.
+It was rebuilt properly:
+
+**New core module `rust/crates/bewildered-core/src/cube_board.rs`** (rules live in core per the
+FFI doctrine; Godot stays presentation-only):
+- `CubeBoard` — full six-face simulation over `Cube6Face`'s `CellId` space
+- Match-free deterministic generation with a bounded seam-aware re-roll loop
+- Seam-aware run detection (`find_line_runs`) excluding blocked cells
+- `try_swap(a, b)` — same-face orthogonal swaps, swap-caused-match validation, revert on reject
+- Cascade resolver: clears → echo detonations → antipodal shockwave charging → special gem
+  persistence (4-run Bolt / 5+-run Nova) → ice chipping via topology neighbours → refill
+  (fresh gems filling cleared cells inherit Echo charges) → rescan until stable
+- **Echo dormancy rule**: charges seeded during a move never chain-detonate in that same move's
+  cascades — they arm for the *next* turn (matches the Resonance Echo vision)
+- `rotate_face(face, clockwise)` — true face-local 90° transpose (3D Tumbler)
+- `CubeOutcome { cascades, clears_by_depth, resonance_multiplier, echoes_detonated,
+  antipodal_charged, specials_created }`
+- Tests: `cube_board_starts_match_free`, `cube_board_fully_populated`,
+  `cube_swap_resolves_cross_seam_run`, `cube_echo_detonation_clears_ring_and_charges_antipode`,
+  `rotate_face_is_deterministic_permutation`, `cube_blocked_cell_breaks_run`
+
+**FFI `CubeSim` rewrite** (`rust/crates/bewildered-godot/src/lib.rs`):
+- Thin shell over `CubeBoard`; emits grouped signals:
+  - `cube_match_resolved(face, cleared_cells, gem_kind, cascade_depth)` — one per (depth, face)
+  - `cube_special_gem_created(face, pos, kind)`
+  - `cube_echo_detonated(face, cells, multiplier)`
+  - `antipodal_echo_charged(target_face, cells)`
+  - `cube_move_rejected(face, ax, ay, bx, by)`
+- API: `new_cube_board(face_size, seed)`, `get_face_cell(face,x,y)` (adds `blocker` field),
+  `try_face_swap(...)`, `rotate_face_gravity(face, clockwise)`, `get_face_size()`, `is_ready()`
+- Removed dead code/imports — workspace builds with zero warnings
+
+**MCP live verification** (new editor session on this checkout):
+- Discovered the previously-connected MCP editor was pointed at a *different* checkout
+  (`~/Projects/BewilderedGodot/bewildered`, stale .so + uncommitted Phase-4 experiments).
+  Launched a second Godot editor on this repo and activated its session.
+- In-game eval: board created (5³ faces), cells populated, brute-forced valid swap resolved,
+  `rotate_face_gravity` OK, all 150 cells occupied after moves.
+
+**Verification**: `cargo test --workspace`: 30 core + 4 content + 5 roundtrip = **39/39 PASS**,
+0 compiler warnings; `cargo build` clean.
+
+**Next**: Phase 4 — Godot 3D cube scene (`scenes/cube_main.tscn`) + snap-turn camera.
