@@ -725,3 +725,57 @@ FFI doctrine; Godot stays presentation-only):
 0 compiler warnings; `cargo build` clean.
 
 **Next**: Phase 4 — Godot 3D cube scene (`scenes/cube_main.tscn`) + snap-turn camera.
+
+### Phase 4 — 3D Cube Scene & Snap-Turn Camera ✅ COMPLETE
+
+**Date**: 2026-08-25
+**Baseline**: Phase 3 commit
+
+**Files Created**:
+- `scenes/cube_main.tscn` — Node3D root; all content built procedurally in script
+- `scripts/cube_main.gd` — cube chamber orchestrator (presentation + input only)
+- `scripts/cube_camera.gd` — `CubeSnapCamera` snap-turn orbit controller
+
+**Face geometry** — world axes match bewildered-core's topology conventions exactly
+(normals/u/v tables): 0=Front(+Z,u+X), 1=Right(+X,u-Z), 2=Back(-Z,u-X), 3=Left(-X,u+Z),
+4=Top(+Y,u+X,v-Z), 5=Bottom(-Y,u+X,v+Z). Each face is a holder Node3D with basis
+`(u, v, normal)` at `normal * N/2`; gems live in holder-local coords so the Tumbler spin
+is a clean rotation about the holder's local Z (= outward normal).
+
+**Presentation**:
+- Procedural sky + key/fill DirectionalLights; dark backplate per face
+- Per-kind StandardMaterial3D (cyan/yellow/green/magenta) + emissive echo variants,
+  stone (matte gray) and translucent ice materials
+- Special/blocker emoji glyphs via per-gem Label3D (⚡ Bolt, ✦ Prism, 💥 Nova, 🪨, 🧊)
+- Match clears: scale-down tweens; buffered single refresh after 0.42s (Stage-6-QA pattern)
+- Echo detonation / antipodal charge / special creation: one-shot expanding shockwave panels
+
+**Camera** (`CubeSnapCamera`):
+- A/D or Left/Right: 90° yaw snaps (Front→Right→Back→Left), shortest-path tween 0.22s TRANS_QUAD
+- W/S or Up/Down: 45° pitch steps clamped to ±78°; Top/Bottom become active above ±60°
+- `active_face()` derives the presented face from azimuth sector + elevation
+- Full 4-turn circuit returns to the exact start orientation (verified live)
+
+**Interaction**:
+- Mouse raycast against per-face StaticBody slabs; hit point converted to face-local cell
+  via holder affine inverse
+- Click select (scale-up highlight) → click adjacent same-face cell → `try_face_swap`
+- Illegal swaps: scale-punch flash on both cells
+- Q/E: 3D Gravity Tumbler — calls `rotate_face_gravity`, spins the holder ±90° about the
+  face normal with quaternion slerp (fixed a Basis.slerp normalization error by using
+  Quaternion slerp), then reseats to the exact rest transform and refreshes
+
+**MCP live verification**:
+- 216/216 gem nodes visible; board full after swaps
+- Yaw: Front→Right (azimuth 0→90); pitch to Top(4) and back; full circle → Front
+- 4× CW tumble returns holder to exact rest basis (no drift); busy state releases
+- Presentation-path swap: busy set → clear tweens → settle → board full
+- Game log clean (zero runtime errors after the slerp fix)
+
+**Known environment note**: the Godot 4.7.2 editor segfaulted once in X11 while relaying a
+synthetic `input_key` release (engine-side crash, backtrace in engine X11 code — not project
+code). Verification now drives input via `game_eval` method calls instead. The stale checkout
+at `~/Projects/BewilderedGodot/bewildered` (old editor + uncommitted Phase-4 experiments) was
+closed; all work continues from `~/Projects/BewilderedGodot_OpenCode`.
+
+**Next**: Phase 5 — variable grid scaling (4×4–10×10) + GPUParticles3D juice + antipodal beam.
