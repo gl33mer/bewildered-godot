@@ -49,6 +49,7 @@ var echo_materials: Array[StandardMaterial3D] = []
 var stone_material: StandardMaterial3D
 var ice_material: StandardMaterial3D
 var plate_material: StandardMaterial3D
+var paper_material: StandardMaterial3D
 
 var selected := {} # {face, x, y}
 var busy := false
@@ -64,6 +65,26 @@ var stats_label: Label
 var tray_box: HBoxContainer
 
 const ANTIPODE_FACE := [2, 3, 0, 1, 5, 4]
+
+const ATLAS_DB := preload("res://scripts/atlas_db.gd")
+const DUOTONE_3D := preload("res://assets/shaders/duotone_card_3d.gdshader")
+const SHEET_TEX := preload("res://assets/sprites/halftone_sheet_clean.png")
+
+## Icon stamp per visual state (kind 0-3, specials, blockers).
+const STATE_ICONS := {
+	"kind0": "kind_disc",
+	"kind1": "kind_triangle",
+	"kind2": "kind_key",
+	"kind3": "kind_diamond",
+	"special1": "special_bolt",
+	"special2": "special_prism",
+	"special3": "special_nova",
+	"blocker1": "blocker_stone",
+	"blocker2": "blocker_ice",
+}
+
+var icon_materials := {} # state key -> ShaderMaterial
+var icon_meshes := {} # state key -> QuadMesh
 
 
 func _ready() -> void:
@@ -179,6 +200,10 @@ func _build_materials() -> void:
 	stone_material.albedo_color = Color("6a6f78")
 	stone_material.roughness = 0.95
 
+	paper_material = StandardMaterial3D.new()
+	paper_material.albedo_color = Color("f2efe6")
+	paper_material.roughness = 0.75
+
 	ice_material = StandardMaterial3D.new()
 	ice_material.albedo_color = Color(0.62, 0.83, 0.98, 0.6)
 	ice_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -190,6 +215,38 @@ func _build_materials() -> void:
 	plate_material = StandardMaterial3D.new()
 	plate_material.albedo_color = Color("181d2e")
 	plate_material.roughness = 0.85
+
+	_build_icon_assets()
+
+
+## Duotone icon quads: shared ShaderMaterial + QuadMesh (custom atlas UVs)
+## per visual state.
+func _build_icon_assets() -> void:
+	var tint_for := {
+		"kind0": Color("00e5ff"), "kind1": Color("ffb300"),
+		"kind2": Color("00e676"), "kind3": Color("e040fb"),
+		"special1": Color("ffe082"), "special2": Color("ffe082"),
+		"special3": Color("ffe082"), "blocker1": Color("78909c"),
+		"blocker2": Color("80deea"),
+	}
+	for key in STATE_ICONS:
+		var rect: Rect2 = ATLAS_DB.icon_rect(STATE_ICONS[key])
+		var mat := ShaderMaterial.new()
+		mat.shader = DUOTONE_3D
+		mat.set_shader_parameter("highlight_color", tint_for[key])
+		mat.set_shader_parameter("echo_amount", 0.0)
+		mat.set_shader_parameter("atlas_region",
+			Vector4(rect.position.x / SHEET_TEX.get_width(),
+				rect.position.y / SHEET_TEX.get_height(),
+				rect.size.x / SHEET_TEX.get_width(),
+				rect.size.y / SHEET_TEX.get_height()))
+		icon_materials[key] = mat
+
+		var mesh := QuadMesh.new()
+		mesh.size = Vector2(CELL * 0.66, CELL * 0.66)
+		var tex_mat := mat
+		tex_mat.set_shader_parameter("source_tex", SHEET_TEX)
+		icon_meshes[key] = mesh
 
 
 func _build_face(f: int) -> void:
@@ -230,14 +287,10 @@ func _build_face(f: int) -> void:
 			holder.add_child(gem)
 			gem_nodes[Vector3i(f, x, y)] = gem
 
-			var glyph := Label3D.new()
-			glyph.name = "Glyph"
-			glyph.font_size = 220
-			glyph.pixel_size = 0.0022
-			glyph.outline_size = 40
-			glyph.modulate = Color.WHITE
-			glyph.position = Vector3(0, 0, 0.13)
-			gem.add_child(glyph)
+			var icon := MeshInstance3D.new()
+			icon.name = "Icon"
+			icon.position = Vector3(0, 0, 0.11)
+			gem.add_child(icon)
 
 
 func _build_hud() -> void:
@@ -308,26 +361,15 @@ func _cell_local(x: int, y: int) -> Vector3:
 
 # ------------------------------------------------------------------ render --
 
-func _material_for(d: Dictionary) -> StandardMaterial3D:
-	if d.get("blocker", 0) == 1:
-		return stone_material
-	if d.get("blocker", 0) == 2:
-		return ice_material
-	var kind: int = d.get("kind", 0)
-	if d.get("has_echo", false):
-		return echo_materials[kind % 4]
-	return kind_materials[kind % 4]
-
-
-func _glyph_for(d: Dictionary) -> String:
-	match int(d.get("blocker", 0)):
-		1: return "🪨"
-		2: return "🧊"
-	match int(d.get("special", 0)):
-		1: return "⚡"
-		2: return "✦"
-		3: return "💥"
-	return ""
+## Map a cell dict to an icon state key ("kind0..3", "special1..3", "blocker1/2").
+func _state_key_for(d: Dictionary) -> String:
+	var blocker := int(d.get("blocker", 0))
+	if blocker > 0:
+		return "blocker%d" % blocker
+	var special := int(d.get("special", 0))
+	if special > 0:
+		return "special%d" % special
+	return "kind%d" % (int(d.get("kind", 0)) % 4)
 
 
 func _refresh_cell(f: int, x: int, y: int) -> void:
@@ -338,10 +380,21 @@ func _refresh_cell(f: int, x: int, y: int) -> void:
 		gem.visible = false
 		return
 	gem.visible = true
-	gem.material_override = _material_for(d)
-	var glyph: Label3D = gem.get_node("Glyph")
-	glyph.text = _glyph_for(d)
-	glyph.modulate = Color.YELLOW if int(d.get("blocker", 0)) == 0 else Color.WHITE
+	# Paper card body; blockers tint the body instead of the stamp.
+	if int(d.get("blocker", 0)) == 1:
+		gem.material_override = stone_material
+	elif int(d.get("blocker", 0)) == 2:
+		gem.material_override = ice_material
+	else:
+		gem.material_override = paper_material
+
+	var state := _state_key_for(d)
+	var icon := gem.get_node("Icon") as MeshInstance3D
+	icon.mesh = icon_meshes[state]
+	icon.material_override = icon_materials[state]
+	var echoing: bool = d.get("has_echo", false)
+	icon_materials[state].set_shader_parameter(
+		"echo_amount", 1.0 if (echoing or int(d.get("special", 0)) > 0) else 0.0)
 
 
 func _refresh_all() -> void:

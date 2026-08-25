@@ -462,6 +462,12 @@ impl BoardSim {
                 Some(SpecialGem::Nova) => 3,
             };
             dict.set("special", special.to_variant());
+            let blocker = match gem.blocker {
+                None => 0,
+                Some(Blocker::Stone) => 1,
+                Some(Blocker::Ice { .. }) => 2,
+            };
+            dict.set("blocker", blocker.to_variant());
         } else {
             dict.set("empty", true.to_variant());
         }

@@ -2,190 +2,117 @@ extends Sprite2D
 
 class_name Gem
 
+## Doodle-atlas gem: an ink stamp card from the halftone sheet rendered with
+## the duotone gradient-map shader (deep ink -> dynamic gem tint), with an
+## echo state that shifts the card to pulsing solar gold.
+
+const ATLAS_DB := preload("res://scripts/atlas_db.gd")
+const DUOTONE_SHADER := preload("res://assets/shaders/duotone_card.gdshader")
+
+## Per-kind highlight tints (kind 0..3) + blocker tints.
+const KIND_TINTS: Array[Color] = [
+	Color("00e5ff"), # Disc / Eye — electric cyan
+	Color("ffb300"), # Flame / Triangle — sunburst amber
+	Color("00e676"), # Box / Key — radiant emerald
+	Color("e040fb"), # Diamond / Ghost — mystic magenta
+]
+const STONE_TINT := Color("78909c")
+const ICE_TINT := Color("80deea")
+
 @export var cell_size: float = 64.0
 
 var current_kind: int = -1
 var has_echo: bool = false
 var current_special: int = 0  # 0 = None, 1 = Bolt, 2 = Prism, 3 = Nova
+var current_blocker: int = 0  # 0 = None, 1 = Stone, 2 = Ice
 
-var special_overlay: Label
+var _material: ShaderMaterial
+var _special_icon: Sprite2D
+
 
 func _ready() -> void:
-	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	
-	special_overlay = Label.new()
-	special_overlay.name = "SpecialOverlay"
-	special_overlay.add_theme_font_size_override("font_size", int(cell_size * 0.45))
-	special_overlay.visible = false
-	special_overlay.z_index = 2
-	special_overlay.set_anchors_preset(Control.PRESET_CENTER)
-	special_overlay.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	special_overlay.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	special_overlay.position = Vector2(-cell_size * 0.5, -cell_size * 0.5)
-	special_overlay.custom_minimum_size = Vector2(cell_size, cell_size)
-	add_child(special_overlay)
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_material = ShaderMaterial.new()
+	_material.shader = DUOTONE_SHADER
+	material = _material
+
+	_special_icon = Sprite2D.new()
+	_special_icon.name = "SpecialIcon"
+	_special_icon.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_special_icon.position = Vector2(cell_size * 0.26, -cell_size * 0.26)
+	_special_icon.scale = Vector2.ONE * (cell_size / 96.0) * 0.62
+	_special_icon.visible = false
+	add_child(_special_icon)
+
 
 func set_gem(kind: int, echo: bool, special: int = 0) -> void:
+	set_gem_state(kind, echo, special, 0)
+
+
+func set_gem_state(kind: int, echo: bool, special: int, blocker: int) -> void:
 	current_kind = kind
 	has_echo = echo
 	current_special = special
-	
-	var img = Image.create(int(cell_size), int(cell_size), false, Image.FORMAT_RGBA8)
-	_draw_gem_shape(img, kind)
-	
-	var tex = ImageTexture.create_from_image(img)
-	self.texture = tex
-	
-	if echo:
-		modulate = Color(1.0, 1.0, 0.4, 1.0)
-	else:
-		modulate = Color(1.0, 1.0, 1.0, 1.0)
-	
-	_update_special_overlay()
+	current_blocker = blocker
+	_apply_visual()
 
-func _update_special_overlay() -> void:
-	if special_overlay == null:
-		return
-		
-	if current_special == 0:
-		special_overlay.visible = false
-		return
-	
-	var text = ""
-	var overlay_color = Color.WHITE
-	
-	match current_special:
-		1:
-			text = "⚡"
-			overlay_color = Color.YELLOW
-		2:
-			text = "🌈"
-			overlay_color = Color.MAGENTA
-		3:
-			text = "💥"
-			overlay_color = Color.ORANGE
-		_:
-			special_overlay.visible = false
-			return
-	
-	special_overlay.text = text
-	special_overlay.add_theme_color_override("font_color", overlay_color)
-	special_overlay.add_theme_color_override("font_outline_color", Color.BLACK)
-	special_overlay.add_theme_constant_override("outline_size", int(cell_size * 0.08))
-	special_overlay.visible = true
 
-func _draw_gem_shape(img: Image, kind: int) -> void:
-	var size = int(cell_size)
-	var center = Vector2(size / 2.0, size / 2.0)
-	var radius = size * 0.35
-	
-	img.fill(Color(0, 0, 0, 0))
-	
-	var colors = [
-		Color(0.0, 0.85, 0.85, 1.0),
-		Color(0.95, 0.85, 0.1, 1.0),
-		Color(0.2, 0.85, 0.2, 1.0),
-		Color(0.9, 0.2, 0.9, 1.0),
-	]
-	
-	var draw_color = colors[kind % colors.size()]
-	var outline_color = Color(draw_color.r * 0.3, draw_color.g * 0.3, draw_color.b * 0.3, 1.0)
-	
-	match kind:
+func _icon_rect(name: String) -> Rect2:
+	return ATLAS_DB.icon_rect(name)
+
+
+func _make_atlas(rect: Rect2) -> AtlasTexture:
+	var tex := AtlasTexture.new()
+	tex.atlas = load(ATLAS_DB.SHEET)
+	tex.region = rect
+	return tex
+
+
+func _apply_visual() -> void:
+	# Pick the stamp: blockers override the kind icon; specials ride as a
+	# small corner badge on top of the kind stamp.
+	var icon := "kind_disc"
+	var tint := KIND_TINTS[0]
+	match current_kind % 4:
 		0:
-			_draw_circle(img, center, radius, draw_color, outline_color)
+			icon = "kind_disc"
+			tint = KIND_TINTS[0]
 		1:
-			_draw_triangle(img, center, radius, draw_color, outline_color)
+			icon = "kind_triangle"
+			tint = KIND_TINTS[1]
 		2:
-			_draw_square(img, center, radius, draw_color, outline_color)
+			icon = "kind_key"
+			tint = KIND_TINTS[2]
 		3:
-			_draw_diamond(img, center, radius, draw_color, outline_color)
+			icon = "kind_diamond"
+			tint = KIND_TINTS[3]
 
-func _draw_circle(img: Image, center: Vector2, radius: float, fill_color: Color, outline_color: Color) -> void:
-	var size = int(cell_size)
-	for y in range(size):
-		for x in range(size):
-			var pos = Vector2(x, y)
-			var dist = pos.distance_to(center)
-			if dist <= radius:
-				var alpha = 1.0
-				if dist > radius - 2.5:
-					alpha = (radius - dist + 1.0) / 2.5
-				img.set_pixel(x, y, fill_color.lerp(outline_color, 1.0 - alpha))
+	if current_blocker == 1:
+		icon = "blocker_stone"
+		tint = STONE_TINT
+	elif current_blocker == 2:
+		icon = "blocker_ice"
+		tint = ICE_TINT
 
-func _draw_triangle(img: Image, center: Vector2, radius: float, fill_color: Color, outline_color: Color) -> void:
-	var size = int(cell_size)
-	var p1 = Vector2(center.x, center.y - radius)
-	var p2 = Vector2(center.x - radius * 0.866, center.y + radius * 0.5)
-	var p3 = Vector2(center.x + radius * 0.866, center.y + radius * 0.5)
-	
-	for y in range(size):
-		for x in range(size):
-			var pos = Vector2(x, y)
-			if _point_in_triangle(pos, p1, p2, p3):
-				var dist_to_edge = _dist_to_triangle_edge(pos, p1, p2, p3)
-				var alpha = 1.0
-				if dist_to_edge < 2.5:
-					alpha = dist_to_edge / 2.5
-				img.set_pixel(x, y, fill_color.lerp(outline_color, 1.0 - alpha))
+	texture = _make_atlas(_icon_rect(icon))
+	_material.set_shader_parameter("highlight_color", tint)
+	_material.set_shader_parameter("echo_amount", 1.0 if has_echo else 0.0)
 
-func _draw_square(img: Image, center: Vector2, radius: float, fill_color: Color, outline_color: Color) -> void:
-	var size = int(cell_size)
-	var half = radius * 0.9
-	var left = center.x - half
-	var right = center.x + half
-	var top = center.y - half
-	var bottom = center.y + half
-	
-	for y in range(size):
-		for x in range(size):
-			var pos = Vector2(x, y)
-			if pos.x >= left and pos.x <= right and pos.y >= top and pos.y <= bottom:
-				var dist_to_edge = min(pos.x - left, right - pos.x, pos.y - top, bottom - pos.y)
-				var alpha = 1.0
-				if dist_to_edge < 2.5:
-					alpha = dist_to_edge / 2.5
-				img.set_pixel(x, y, fill_color.lerp(outline_color, 1.0 - alpha))
-
-func _draw_diamond(img: Image, center: Vector2, radius: float, fill_color: Color, outline_color: Color) -> void:
-	var size = int(cell_size)
-	for y in range(size):
-		for x in range(size):
-			var pos = Vector2(x, y)
-			var dx = abs(pos.x - center.x)
-			var dy = abs(pos.y - center.y)
-			if dx + dy <= radius:
-				var dist_to_edge = radius - (dx + dy)
-				var alpha = 1.0
-				if dist_to_edge < 2.5:
-					alpha = dist_to_edge / 2.5
-				img.set_pixel(x, y, fill_color.lerp(outline_color, 1.0 - alpha))
-
-func _point_in_triangle(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> bool:
-	var v0 = c - a
-	var v1 = b - a
-	var v2 = p - a
-	var dot00 = v0.dot(v0)
-	var dot01 = v0.dot(v1)
-	var dot02 = v0.dot(v2)
-	var dot11 = v1.dot(v1)
-	var dot12 = v1.dot(v2)
-	var inv_denom = 1.0 / (dot00 * dot11 - dot01 * dot01)
-	var u = (dot11 * dot02 - dot01 * dot12) * inv_denom
-	var v = (dot00 * dot12 - dot01 * dot02) * inv_denom
-	return (u >= 0) and (v >= 0) and (u + v <= 1)
-
-func _dist_to_triangle_edge(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> float:
-	return min(
-		_dist_to_segment(p, a, b),
-		_dist_to_segment(p, b, c),
-		_dist_to_segment(p, c, a)
-	)
-
-func _dist_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
-	var ab = b - a
-	var ap = p - a
-	var t = ap.dot(ab) / ab.dot(ab)
-	t = clamp(t, 0.0, 1.0)
-	var closest = a + ab * t
-	return p.distance_to(closest)
+	# Corner badge for special gems (gold duotone).
+	if current_special > 0 and current_blocker == 0:
+		var badge := "special_bolt"
+		match current_special:
+			1: badge = "special_bolt"
+			2: badge = "special_prism"
+			3: badge = "special_nova"
+		_special_icon.texture = _make_atlas(_icon_rect(badge))
+		var bm := _special_icon.material as ShaderMaterial
+		if bm == null:
+			bm = ShaderMaterial.new()
+			bm.shader = DUOTONE_SHADER
+			_special_icon.material = bm
+		bm.set_shader_parameter("highlight_color", Color("ffe082"))
+		bm.set_shader_parameter("echo_amount", 1.0)
+		_special_icon.visible = true
+	else:
+		_special_icon.visible = false

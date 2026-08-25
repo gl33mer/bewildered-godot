@@ -724,7 +724,7 @@ func refresh_board() -> void:
 					gem_instances[idx] = gem_instance
 				
 				var special = cell.get("special", 0)
-				gem_instance.set_gem(cell.kind, cell.has_echo, special)
+				gem_instance.set_gem_state(cell.kind, cell.has_echo, special, cell.get("blocker", 0))
 
 				var pos = _get_cell_position(x, y)
 				gem_instance.position = pos
@@ -831,7 +831,7 @@ func _spawn_new_gems() -> float:
 				var has_echo = cell.has_echo
 				var special = cell.get("special", 0)
 				var gem_instance = gem_scene.instantiate()
-				gem_instance.set_gem(kind, has_echo, special)
+				gem_instance.set_gem_state(kind, has_echo, special, cell.get("blocker", 0))
 				gem_instance.position = _get_cell_position(x, -1)
 				add_child(gem_instance)
 				gem_instances[idx] = gem_instance
