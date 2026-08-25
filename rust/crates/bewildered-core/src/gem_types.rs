@@ -61,3 +61,18 @@ impl<'de> Deserialize<'de> for GemKind {
         GemKind::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
+
+impl TryFrom<u8> for GemKind {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(GemKind::Circle),
+            1 => Ok(GemKind::Triangle),
+            2 => Ok(GemKind::Square),
+            3 => Ok(GemKind::Diamond),
+            4 => Ok(GemKind::Star),
+            5 => Ok(GemKind::Cross),
+            _ => Err(()),
+        }
+    }
+}

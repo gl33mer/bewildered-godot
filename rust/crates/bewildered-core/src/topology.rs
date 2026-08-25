@@ -33,6 +33,9 @@ pub trait Topology: Send + Sync + std::fmt::Debug {
     /// Index of the face (0..face_count) that contains `cell`.
     fn face_of(&self, cell: CellId) -> usize;
 
+    /// Get the (face, x, y) coordinates for a cell.
+    fn coords(&self, cell: CellId) -> (usize, i32, i32);
+
     /// Number of faces.
     fn face_count(&self) -> usize {
         1
@@ -55,9 +58,9 @@ impl Flat2D {
         Self { width, height }
     }
 
-    fn coords(&self, cell: CellId) -> (usize, usize) {
+    pub fn coords(&self, cell: CellId) -> (usize, i32, i32) {
         let c = cell.0 as usize;
-        (c / self.width, c % self.width)
+        (0, (c % self.width) as i32, (c / self.width) as i32)
     }
 }
 
@@ -66,25 +69,44 @@ impl Topology for Flat2D {
         self.width * self.height
     }
 
+    fn coords(&self, cell: CellId) -> (usize, i32, i32) {
+        let c = cell.0 as usize;
+        (0, (c % self.width) as i32, (c / self.width) as i32)
+    }
+
     fn step(&self, cell: CellId, dir: Direction) -> Option<(CellId, Direction)> {
-        let (r, c) = self.coords(cell);
+        let (_face, c, r) = self.coords(cell); // (face, x=col, y=row)
         let (nr, nc) = match dir {
-            Direction::Up => (r.checked_sub(1)?, c),
-            Direction::Down => {
-                if r + 1 >= self.height {
+            Direction::Up => {
+                let nr = r - 1;
+                if nr < 0 {
                     return None;
                 }
-                (r + 1, c)
+                (nr, c)
             }
-            Direction::Left => (r, c.checked_sub(1)?),
-            Direction::Right => {
-                if c + 1 >= self.width {
+            Direction::Down => {
+                let nr = r + 1;
+                if nr >= self.height as i32 {
                     return None;
                 }
-                (r, c + 1)
+                (nr, c)
+            }
+            Direction::Left => {
+                let nc = c - 1;
+                if nc < 0 {
+                    return None;
+                }
+                (r, nc)
+            }
+            Direction::Right => {
+                let nc = c + 1;
+                if nc >= self.width as i32 {
+                    return None;
+                }
+                (r, nc)
             }
         };
-        Some((CellId((nr * self.width + nc) as u32), dir))
+        Some((CellId((nr as usize * self.width + nc as usize) as u32), dir))
     }
 
     fn face_of(&self, _cell: CellId) -> usize {
@@ -98,7 +120,7 @@ impl Topology for Flat2D {
 
 /// Six-face cube, each face an `N x N` grid. Face order:
 /// 0=Front(+Z), 1=Right(+X), 2=Back(-Z), 3=Left(-X), 4=Top(+Y), 5=Bottom(-Y).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Cube6Face {
     pub face_size: usize,
 }
@@ -202,7 +224,7 @@ impl Cube6Face {
         CellId(((face as i32 * n * n) + y * n + x) as u32)
     }
 
-    fn coords(&self, cell: CellId) -> (usize, i32, i32) {
+    pub fn coords(&self, cell: CellId) -> (usize, i32, i32) {
         let n = self.n();
         let c = cell.0 as i32;
         let per = n * n;
@@ -215,6 +237,15 @@ impl Cube6Face {
 impl Topology for Cube6Face {
     fn cell_count(&self) -> usize {
         6 * self.face_size * self.face_size
+    }
+
+    fn coords(&self, cell: CellId) -> (usize, i32, i32) {
+        let n = self.n();
+        let c = cell.0 as i32;
+        let per = n * n;
+        let face = (c / per) as usize;
+        let rem = c % per;
+        (face, rem % n, rem / n)
     }
 
     fn face_count(&self) -> usize {

@@ -595,3 +595,36 @@ and was re-verified rather than re-applied.
 - `rust/crates/bewildered-core/src/lib.rs` (re-exports topology)
 
 **Next**: Phase 2 — Durable Blockers & Antipodal Echo Raycasting in bewildered-core
+
+### Phase 2 — Durable Blockers & Antipodal Echoes ✅ COMPLETE
+
+**Date**: 2026-08-24
+**Baseline**: commit be16456 (Phase 1 complete)
+
+**Summary**:
+- **Blocker system**: Added `Blocker` enum with two variants:
+  - `Stone`: Indestructible, falls with gravity, cannot be matched
+  - `Ice { layers: u8 }`: Encases a gem, immovable (immune to gravity) until
+    adjacent match breaks one layer; last layer breaks revealing the gem
+- **Gem.blocker**: New optional field on `Gem` carrying blocker state
+- **Gravity updates**: 
+  - `apply_gravity_vertical/horizontal` now skip cells with immovable blockers (Ice)
+  - Stone falls normally
+- **Ice-breaking**: When a match clears cells, `hit_adjacent_ice()` hits orthogonal
+  neighbors, reducing Ice layers or breaking them entirely
+- **Antipodal Resonance Shockwave**: When an echo detonates, `charge_antipodal_echo()`
+  finds the antipodal cell via `Topology::antipode()` and adds/extends an echo
+  charge (2 moves minimum) — only active on `Cube6Face`, no-op on `Flat2D`
+- **RuleModifiers.topology**: Added `Option<Box<dyn Topology>>` field to carry
+  geometry-dependent rules; manual `Clone` implementation excludes topology
+  (per-board, not per-relic)
+- **Topology trait bounds**: Added `std::fmt::Debug` bound for dyn compatibility;
+  `Flat2D` and `Cube6Face` implement `Debug`, `Clone`, `Serialize`, `Deserialize`
+
+**Tests**: All 17 core topology tests pass; full workspace 26/26 green.
+
+**Files Modified**:
+- `rust/crates/bewildered-core/src/topology.rs` (Debug/Clone/Serialize bounds, derives)
+- `rust/crates/bewildered-core/src/lib.rs` (Blocker, Gem.blocker, gravity, ice-breaking, antipodal charging, RuleModifiers topology field)
+
+**Next**: Phase 3 — GDExtension Multi-Face FFI Bridge (`bewildered-godot`)

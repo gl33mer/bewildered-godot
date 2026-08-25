@@ -291,7 +291,7 @@ pub struct Board {
     /// Active gem types for spawning.
     pub gem_types: Vec<GemKind>,
     /// RNG for deterministic spawning.
-    rng: StdRng,
+    pub rng: StdRng,
     /// Current resonance multiplier from echo detonations (1.0 = no resonance).
     pub resonance_multiplier: f32,
     /// Count of echoes that detonated in the current move (for stacking).
