@@ -53,6 +53,7 @@ var paper_material: StandardMaterial3D
 
 var selected := {} # {face, x, y}
 var busy := false
+var _touch_device := false
 var status_label: Label
 var faces_root: Node3D
 
@@ -88,6 +89,7 @@ var icon_meshes := {} # state key -> QuadMesh
 
 
 func _ready() -> void:
+	_touch_device = DisplayServer.is_touchscreen_available()
 	_build_environment()
 	_build_materials()
 
@@ -628,10 +630,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R: start_descent(face_size)
 	elif event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
-		_handle_click(event.position)
+		# On touch devices Godot synthesizes mouse events from taps; handling
+		# both would select+deselect in a single tap. Touch = ScreenTouch only.
+		if not _touch_device:
+			_handle_click(event.position)
 	elif event is InputEventScreenTouch and event.pressed:
-		# Direct touchscreen taps (mobile); mouse emulation also feeds the
-		# InputEventMouseButton path above, this covers emulation-off devices.
 		_handle_click(event.position)
 
 

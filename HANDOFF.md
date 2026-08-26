@@ -925,5 +925,24 @@ playable; APK builds headlessly.
   "First Steps" (campaign-001, 20 moves) through the new path.
 - APK rebuilt via `scripts/build_android.sh` (36MB, signed) and re-served on :8080.
 
+### Android Fix — Tap Double-Handling (touch + emulated mouse) ✅ COMPLETE
+
+**Date**: 2026-08-26
+**Reported**: on the phone, tapping gems never allowed a swap.
+
+**Root cause**: `cube_main.gd` handled both `InputEventScreenTouch` and
+`InputEventMouseButton`. With Godot's default `emulate_mouse_from_touch`, every finger
+tap arrives as BOTH events — the first selects the gem, the synthesized duplicate
+immediately deselects it (same cell). A selection could never survive to the second tap.
+
+**Fix**: `_touch_device = DisplayServer.is_touchscreen_available()` in `_ready()`; the
+mouse branch of `_unhandled_input` is gated on `not _touch_device`. Phones process
+`ScreenTouch` only; desktop keeps the mouse path. Tap-tap swap (tap gem → tap adjacent
+gem) is the designed interaction; swipe-to-swap is a planned follow-up.
+
+**Verified**: desktop mouse select persists after one click, same-cell tap deselects,
+adjacent tap resolves and the board settles full; APK rebuilt (36MB, signed) and
+re-served on :8080.
+
 **Next**: Post-roadmap polish — balance pass on resonance compounding, audio wiring for
 cube signals, daily-seed descent.
