@@ -33,6 +33,10 @@ enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
 
 window/vsync/vsync_mode=0
 
+[rendering]
+
+textures/vram_compression/import_etc2_astc=true
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

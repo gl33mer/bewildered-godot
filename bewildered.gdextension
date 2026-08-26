@@ -5,3 +5,5 @@ compatibility_minimum = 4.1
 [libraries]
 linux.debug.x86_64 = "res://rust/target/debug/libbewildered_godot.so"
 linux.release.x86_64 = "res://rust/target/release/libbewildered_godot.so"
+android.debug.arm64 = "res://rust/target/aarch64-linux-android/debug/libbewildered_godot.so"
+android.release.arm64 = "res://rust/target/aarch64-linux-android/release/libbewildered_godot.so"

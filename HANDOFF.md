@@ -854,3 +854,56 @@ scaling, tumble at 8×8, board fullness, beam/shatter node lifecycle, no runtime
 
 **Next**: Post-roadmap polish — balance pass on resonance compounding, audio wiring for
 cube signals, daily-seed descent.
+
+### Milestones 1–4 — Doodle Atlas, Mobile Touch, 3D Juice, Android Pipeline ✅ COMPLETE
+
+**Date**: 2026-08-26
+
+**Milestone 1 — Atlas & Duotone (commit e35afa6)**:
+- `assets/sprites/halftone_sheet.png` (1408×768, baked checkerboard) segmented offline into
+  **180 ink-stamp cards** (10 rows × 18 cols); checker keyed out into
+  `halftone_sheet_clean.png`; grid baked into `scripts/atlas_db.gd` (RECTS + named ICONS)
+- `assets/shaders/duotone_card.gdshader` (canvas_item) + `duotone_card_3d.gdshader`
+  (spatial, with `atlas_region` UV remap): luminance gradient-map deep-ink `#141419` →
+  per-kind highlight (cyan/amber/emerald/magenta), solar-gold echo pulse
+- 2D `gem.gd` rewritten: atlas stamps via AtlasTexture + duotone material, corner badge for
+  specials, blocker stamps (Stone granite / Ice frost) + `set_gem_state(kind,echo,special,blocker)`;
+  BoardSim FFI now reports `blocker`; 3D cube gems are paper cards with duotone icon quads
+- Verified live in both scenes via MCP screenshots
+
+**Milestone 2 — Touch Controls (commit 41afb4d)**:
+- `scenes/cube_touch_controls.tscn` + `scripts/cube_touch_controls.gd`: ◀▶ yaw pads,
+  ▲▼ pitch pads, CCW/CW tumbler buttons (80px targets, MOUSE_FILTER_STOP on buttons only,
+  root IGNORE), plus 4/6/8/10 board-size toggles (M3)
+- `InputEventScreenTouch` tap-to-select/swap path added alongside mouse in `cube_main.gd`
+- Verified live: overlay signals drive camera yaw Front→Right, pitch→Top, tumbler spin
+
+**Milestone 3 — 3D Juice & Scaling (commit 71e82e3)**:
+- Shatter bursts upgraded to **GPUParticles3D** (ParticleProcessMaterial, billboard pass,
+  face-normal ejection, kind-colored)
+- Antipodal resonance beam (x-ray emissive lance through the cube center + strike shockwave)
+  and adaptive camera distance from Phase 5 retained; size toggles now also on-screen
+- Verified live at 8×8 (384 gems) with FX node lifecycle checks
+
+**Milestone 4 — Android APK Pipeline (this commit)**:
+- Bootstrapped the full toolchain from scratch: Android SDK at `~/Android/Sdk`
+  (cmdline-tools, platform-35, build-tools 35.0.0, NDK r27, licenses accepted),
+  Godot 4.7.2 export templates installed, JDK 17 path wired into editor settings
+- `bewildered.gdextension`: merged `[libraries]` with `android.debug/release.arm64` entries
+- `cargo ndk -t arm64-v8a --platform 23 build` (debug + release; release .so = 2.8MB)
+- `export_presets.cfg`: Android preset (arm64-v8a, package `org.godotengine.bewildered`,
+  debug keystore `~/.android/debug.keystore`, ETC2/ASTC enabled in project settings)
+- `scripts/build_android.sh`: one-command reproducible pipeline (ndk build → strip → export)
+- **`build/bewildered.apk` exported, signed, 36MB** (arm64-v8a + embedded pck), served at
+  `http://<host>:8080/bewildered.apk` via `python3 -m http.server 8080` in `build/`
+
+**Environment notes**: /tmp is a small tmpfs (use ~/.cache for big downloads); Hyprland has
+a broken dispatch-intercepting plugin (focus changes via socket dispatch fail); game windows
+occluded by the editor stall on vsync — `vsync_mode=0` set in project.godot keeps MCP-driven
+game evals responsive.
+
+**Status**: `cargo test --workspace` 45/45 PASS, 0 warnings. 2D campaign + 3D cube both
+playable; APK builds headlessly.
+
+**Next**: Post-roadmap polish — balance pass on resonance compounding, audio wiring for
+cube signals, daily-seed descent.
