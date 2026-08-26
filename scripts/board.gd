@@ -99,8 +99,16 @@ func _ready():
 func _load_level(index: int) -> void:
 	current_level_id = "campaign-%03d" % index
 	var res_path := "res://levels/%s.ron" % current_level_id
-	var os_path := ProjectSettings.globalize_path(res_path)
-	var ok: bool = board_sim.load_level_file(os_path)
+	# Read via FileAccess: on Android the .ron files live inside the APK pck
+	# and are invisible to OS-level file APIs.
+	var ok: bool = false
+	if FileAccess.file_exists(res_path):
+		var f := FileAccess.open(res_path, FileAccess.READ)
+		if f:
+			ok = board_sim.load_level_from_ron(f.get_as_text())
+	if not ok:
+		# Desktop fallback: direct OS path (dev checkouts outside the pck).
+		ok = board_sim.load_level_file(ProjectSettings.globalize_path(res_path))
 	if not ok:
 		push_warning("[bewildered] Failed to load level %s: %s" % [current_level_id, board_sim.get_last_error()])
 	# Always trust the sim's actual grid dimensions (levels can differ from the

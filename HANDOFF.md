@@ -905,5 +905,25 @@ game evals responsive.
 **Status**: `cargo test --workspace` 45/45 PASS, 0 warnings. 2D campaign + 3D cube both
 playable; APK builds headlessly.
 
+### Android Fix — Cube Boot Scene + pck-Aware Level Loading ✅ COMPLETE
+
+**Date**: 2026-08-26
+**Reported**: APK launched into the 2D campaign with "No level loaded".
+
+**Root causes**:
+1. `project.godot` main scene was `main.tscn` (2D campaign), not the cube chamber.
+2. The 2D loader used `ProjectSettings.globalize_path()` + OS file APIs — on Android the
+   `.ron` levels live *inside* the APK pck and are invisible to the filesystem.
+
+**Fixes**:
+- `run/main_scene` → `res://scenes/cube_main.tscn` (the sandbox boots straight into the
+  3D cube; `scenes/main.tscn` remains the 2D campaign entry).
+- `board.gd _load_level` now reads RON via `FileAccess` (pck-aware, works on all platforms)
+  and feeds `BoardSim.load_level_from_ron`, with the OS-path `load_level_file` kept as a
+  desktop dev fallback.
+- Verified: desktop F5 boots CubeMain (chamber 1, 216 gems); 2D campaign still loads
+  "First Steps" (campaign-001, 20 moves) through the new path.
+- APK rebuilt via `scripts/build_android.sh` (36MB, signed) and re-served on :8080.
+
 **Next**: Post-roadmap polish — balance pass on resonance compounding, audio wiring for
 cube signals, daily-seed descent.
