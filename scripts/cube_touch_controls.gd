@@ -12,6 +12,7 @@ signal pitch_up
 signal pitch_down
 signal spin_ccw
 signal spin_cw
+signal size_selected(n: int)
 
 const BUTTON_SIZE := 80.0
 
@@ -54,6 +55,25 @@ func _ready() -> void:
 	root.add_child(center)
 	_add_button(center, "CCW", func(): spin_ccw.emit())
 	_add_button(center, "CW", func(): spin_cw.emit())
+
+	# Top-right: board size toggles (4 / 6 / 8 / 10).
+	var sizes := HBoxContainer.new()
+	sizes.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	sizes.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	sizes.grow_vertical = Control.GROW_DIRECTION_END
+	sizes.position = Vector2(-4, 10)
+	sizes.add_theme_constant_override("separation", 6)
+	root.add_child(sizes)
+	for n in [4, 6, 8, 10]:
+		var b := Button.new()
+		b.text = str(n)
+		b.custom_minimum_size = Vector2(52, 52)
+		b.add_theme_font_size_override("font_size", 20)
+		b.mouse_filter = Control.MOUSE_FILTER_STOP
+		b.focus_mode = Control.FOCUS_NONE
+		var target: int = n
+		b.pressed.connect(func(): size_selected.emit(target))
+		sizes.add_child(b)
 
 
 func _add_button(parent: Control, label: String, action: Callable) -> void:

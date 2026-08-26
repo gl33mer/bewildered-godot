@@ -334,6 +334,7 @@ func _build_hud() -> void:
 	touch.pitch_down.connect(func(): _try_pitch(false))
 	touch.spin_ccw.connect(func(): _try_tumble(false))
 	touch.spin_cw.connect(func(): _try_tumble(true))
+	touch.size_selected.connect(func(n: int): start_descent(n))
 	add_child(touch)
 
 
@@ -432,35 +433,40 @@ func _on_match_resolved(face: int, cleared_cells: Array, gem_kind: int, _cascade
 	_schedule_refresh()
 
 
-## One-shot gem shatter burst, blowing out normal to the face plane.
+## One-shot gem shatter burst (GPUParticles3D), blowing out normal to the
+## face plane.
 func _spawn_shatter(face: int, pos: Vector2i, color: Color) -> void:
 	if face < 0 or face >= 6:
 		return
-	var p := CPUParticles3D.new()
+	var p := GPUParticles3D.new()
 	p.one_shot = true
 	p.emitting = true
 	p.explosiveness = 1.0
 	p.amount = 14
 	p.lifetime = 0.55
 	p.local_coords = true
-	p.direction = Vector3(0, 0, 1)
-	p.spread = 65.0
-	p.initial_velocity_min = 1.6
-	p.initial_velocity_max = 3.4
-	p.gravity = Vector3(0, 0, -5.0)
-	p.scale_amount_min = 0.5
-	p.scale_amount_max = 1.0
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = Vector3(0, 0, 1)
+	pm.spread = 65.0
+	pm.initial_velocity_min = 1.6
+	pm.initial_velocity_max = 3.4
+	pm.gravity = Vector3(0, 0, -5.0)
+	pm.scale_min = 0.5
+	pm.scale_max = 1.0
+	pm.color = color
+	p.process_material = pm
 	var mesh := QuadMesh.new()
 	mesh.size = Vector2(0.16, 0.16)
 	var m := StandardMaterial3D.new()
-	m.albedo_color = color
+	m.vertex_color_use_as_albedo = true
 	m.emission_enabled = true
 	m.emission = color
 	m.emission_energy_multiplier = 1.2
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mesh.material = m
-	p.mesh = mesh
+	p.draw_pass_1 = mesh
 	p.position = _cell_local(pos.x, pos.y) + Vector3(0, 0, 0.1)
 	holders[face].add_child(p)
 	get_tree().create_timer(1.1).timeout.connect(p.queue_free)
