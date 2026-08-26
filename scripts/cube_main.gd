@@ -50,13 +50,17 @@ var stone_material: StandardMaterial3D
 var ice_material: StandardMaterial3D
 var plate_material: StandardMaterial3D
 var paper_material: StandardMaterial3D
-
 var selected := {} # {face, x, y}
 var busy := false
 var _touch_device := false
 var _drag_start := Vector2.ZERO
 var _drag_gem_face := -1
 var _drag_gem_cell := Vector2i(-1, -1)
+# Pinch-to-zoom tracking.
+var _pinch_touch1 := -1
+var _pinch_touch2 := -1
+var _pinch_start_dist := 0.0
+var _pinch_start_zoom := 1.0
 var _debug_shatter := false
 var _debug_beam := false
 var _debug_shockwave := false
@@ -412,7 +416,10 @@ func _build_debug_effects_ui(layer: CanvasLayer) -> void:
 	zslider.max_value = 2.0
 	zslider.step = 0.05
 	zslider.value = 1.0
-	zslider.custom_minimum_size = Vector2(180, 0)
+	zslider.custom_minimum_size = Vector2(180, 44)
+	zslider.add_theme_constant_override("slider_height", 12)
+	zslider.add_theme_constant_override("grabber_width", 28)
+	zslider.add_theme_constant_override("grabber_height", 28)
 	zslider.value_changed.connect(func(v: float):
 		camera.set_zoom_factor(v)
 	)
@@ -730,17 +737,52 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _touch_device:
 			_handle_click(event.position)
 	elif event is InputEventScreenTouch and event.pressed:
-		_drag_start = event.position
-		_drag_gem_face = -1
-		_drag_gem_cell = Vector2i(-1, -1)
-		var hit := _pick_face_cell(event.position)
-		if not hit.is_empty():
-			_drag_gem_face = hit.face
-			_drag_gem_cell = Vector2i(hit.x, hit.y)
+		# Pinch-to-zoom: track first two fingers.
+		if _pinch_touch1 == -1:
+			_pinch_touch1 = event.index
+		elif _pinch_touch2 == -1 and event.index != _pinch_touch1:
+			_pinch_touch2 = event.index
+			var p1: Vector2 = get_viewport().get_mouse_position()
+			var p2: Vector2 = event.position
+			_pinch_start_dist = p1.distance_to(p2)
+			_pinch_start_zoom = camera.zoom_factor
+		# Also handle drag/swipe on first finger.
+		if event.index == _pinch_touch1:
+			_drag_start = event.position
+			_drag_gem_face = -1
+			_drag_gem_cell = Vector2i(-1, -1)
+			var hit := _pick_face_cell(event.position)
+			if not hit.is_empty():
+				_drag_gem_face = hit.face
+				_drag_gem_cell = Vector2i(hit.x, hit.y)
 	elif event is InputEventScreenTouch and not event.pressed:
-		_finalize_drag(event.position)
+		# Finger released.
+		if event.index == _pinch_touch1:
+			_pinch_touch1 = -1
+			_pinch_touch2 = -1
+			_finalize_drag(event.position)
+		elif event.index == _pinch_touch2:
+			_pinch_touch2 = -1
 	elif event is InputEventScreenDrag:
-		_update_drag(event.position)
+		# Update pinch zoom if two fingers.
+		if _pinch_touch1 != -1 and _pinch_touch2 != -1:
+			# One of the fingers moved - update zoom.
+			var touches: Array[Vector2] = []
+			for i in range(get_viewport().get_touch_count()):
+				touches.append(get_viewport().get_touch_position(i))
+			if touches.size() >= 2:
+				var d: float = touches[0].distance_to(touches[1])
+				var factor := d / _pinch_start_dist
+				var new_zoom := clampf(_pinch_start_zoom * factor, 0.5, 2.0)
+				camera.set_zoom_factor(new_zoom)
+				# Update the HUD slider if it exists.
+				var panel := get_node_or_null("CanvasLayer/DebugEffects")
+				if panel:
+					var slider := panel.find_child("HSlider")
+					if slider:
+						slider.value = new_zoom
+		else:
+			_update_drag(event.position)
 
 
 func _finalize_drag(final_pos: Vector2) -> void:
@@ -862,12 +904,31 @@ func _handle_click(screen_pos: Vector2) -> void:
 func _attempt_swap(face: int, ax: int, ay: int, bx: int, by: int) -> void:
 	busy = true
 	_clear_selection()
-	if sim.try_face_swap(face, ax, ay, bx, by):
-		# Clear animations arrive via cube_match_resolved; refresh timer unlocks.
-		pass
-	else:
-		_flash_reject(face, Vector2i(ax, ay), Vector2i(bx, by))
-		busy = false
+	var key_a := Vector3i(face, ax, ay)
+	var key_b := Vector3i(face, bx, by)
+	var gem_a: MeshInstance3D = gem_nodes[key_a]
+	var gem_b: MeshInstance3D = gem_nodes[key_b]
+	var pos_a := gem_a.position
+	var pos_b := gem_b.position
+	# Animate the visual swap.
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(gem_a, "position", pos_b, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(gem_b, "position", pos_a, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.finished.connect(func():
+		# After visual swap, apply the logical swap.
+		if sim.try_face_swap(face, ax, ay, bx, by):
+			# Clear animations arrive via cube_match_resolved; refresh timer unlocks.
+			pass
+		else:
+			# Revert visual swap on reject.
+			var tw2 := create_tween()
+			tw2.set_parallel(true)
+			tw2.tween_property(gem_a, "position", pos_a, 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tw2.tween_property(gem_b, "position", pos_b, 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			_flash_reject(face, Vector2i(ax, ay), Vector2i(bx, by))
+			busy = false
+	)
 
 
 func _flash_reject(face: int, a: Vector2i, b: Vector2i) -> void:
