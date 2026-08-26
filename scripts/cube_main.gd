@@ -327,6 +327,15 @@ func _build_hud() -> void:
 	relic_ui.relic_chosen.connect(_on_relic_chosen)
 	add_child(relic_ui)
 
+	var touch := CubeTouchControls.new()
+	touch.turn_left.connect(func(): _try_turn(-1))
+	touch.turn_right.connect(func(): _try_turn(1))
+	touch.pitch_up.connect(func(): _try_pitch(true))
+	touch.pitch_down.connect(func(): _try_pitch(false))
+	touch.spin_ccw.connect(func(): _try_tumble(false))
+	touch.spin_cw.connect(func(): _try_tumble(true))
+	add_child(touch)
+
 
 func _update_tray() -> void:
 	for child in tray_box.get_children():
@@ -613,6 +622,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R: start_descent(face_size)
 	elif event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
+		_handle_click(event.position)
+	elif event is InputEventScreenTouch and event.pressed:
+		# Direct touchscreen taps (mobile); mouse emulation also feeds the
+		# InputEventMouseButton path above, this covers emulation-off devices.
 		_handle_click(event.position)
 
 
