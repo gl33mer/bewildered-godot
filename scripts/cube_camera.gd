@@ -17,6 +17,8 @@ const DEFAULT_ELEVATION := 22.0
 var azimuth_deg := 0.0
 var elevation_deg := DEFAULT_ELEVATION
 var distance := 14.0
+var base_distance := 14.0
+var zoom_factor := 1.0
 
 var _tween: Tween
 
@@ -32,6 +34,14 @@ func is_turning() -> bool:
 ## Adjust orbit distance (dynamic scaling for variable face sizes).
 func set_distance(d: float) -> void:
 	distance = maxf(d, 3.0)
+	base_distance = distance
+	zoom_factor = 1.0
+	_apply()
+
+
+func set_zoom_factor(zf: float) -> void:
+	zoom_factor = zf
+	distance = base_distance * zoom_factor
 	_apply()
 
 

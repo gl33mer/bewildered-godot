@@ -54,6 +54,14 @@ var paper_material: StandardMaterial3D
 var selected := {} # {face, x, y}
 var busy := false
 var _touch_device := false
+var _drag_start := Vector2.ZERO
+var _drag_gem_face := -1
+var _drag_gem_cell := Vector2i(-1, -1)
+var _debug_shatter := false
+var _debug_beam := false
+var _debug_shockwave := false
+var _debug_selection := false
+var _debug_facespin := false
 var status_label: Label
 var faces_root: Node3D
 
@@ -313,7 +321,6 @@ func _build_hud() -> void:
 	layer.add_child(hint)
 
 	stats_label = Label.new()
-	stats_label.text = ""
 	stats_label.position = Vector2(16, 72)
 	stats_label.add_theme_font_size_override("font_size", 16)
 	stats_label.add_theme_color_override("font_color", Color("ffd76a"))
@@ -329,6 +336,8 @@ func _build_hud() -> void:
 	relic_ui.relic_chosen.connect(_on_relic_chosen)
 	add_child(relic_ui)
 
+	_build_debug_effects_ui(layer)
+
 	var touch := CubeTouchControls.new()
 	touch.turn_left.connect(func(): _try_turn(-1))
 	touch.turn_right.connect(func(): _try_turn(1))
@@ -338,6 +347,86 @@ func _build_hud() -> void:
 	touch.spin_cw.connect(func(): _try_tumble(true))
 	touch.size_selected.connect(func(n: int): start_descent(n))
 	add_child(touch)
+
+
+func _build_debug_effects_ui(layer: CanvasLayer) -> void:
+	var panel := PanelContainer.new()
+	panel.name = "DebugEffects"
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.07, 0.09, 0.16, 0.88)
+	bg.set_corner_radius_all(8)
+	bg.set_content_margin_all(10)
+	panel.add_theme_stylebox_override("panel", bg)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	panel.position = Vector2(-220, 96)
+	panel.size = Vector2(208, 0)
+	layer.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	panel.add_child(vbox)
+
+	var header := Label.new()
+	header.text = "EFFECTS (DEBUG)"
+	header.add_theme_font_size_override("font_size", 13)
+	header.modulate = Color(1, 1, 1, 0.55)
+	vbox.add_child(header)
+
+	var toggles := [
+		{"flag": "_debug_shatter", "label": "Shatter burst"},
+		{"flag": "_debug_beam", "label": "Antipodal beam"},
+		{"flag": "_debug_shockwave", "label": "Shockwave"},
+		{"flag": "_debug_selection", "label": "Selection scale"},
+		{"flag": "_debug_facespin", "label": "Face spin tumble"},
+	]
+	for t in toggles:
+		var h := HBoxContainer.new()
+		var cb := CheckBox.new()
+		cb.button_pressed = false
+		var flag_name: String = t.flag
+		var cb2 := cb
+		cb.toggled.connect(func(on: bool):
+			set(flag_name, on)
+		)
+		h.add_child(cb)
+		var lbl := Label.new()
+		lbl.text = t.label
+		lbl.add_theme_font_size_override("font_size", 14)
+		h.add_child(lbl)
+		vbox.add_child(h)
+
+	# Zoom slider.
+	var zsep := Label.new()
+	zsep.text = "---"
+	zsep.modulate = Color(1, 1, 1, 0.2)
+	vbox.add_child(zsep)
+
+	var zheader := Label.new()
+	zheader.text = "ZOOM"
+	zheader.add_theme_font_size_override("font_size", 13)
+	zheader.modulate = Color(1, 1, 1, 0.55)
+	vbox.add_child(zheader)
+
+	var zslider := HSlider.new()
+	zslider.min_value = 0.5
+	zslider.max_value = 2.0
+	zslider.step = 0.05
+	zslider.value = 1.0
+	zslider.custom_minimum_size = Vector2(180, 0)
+	zslider.value_changed.connect(func(v: float):
+		camera.set_zoom_factor(v)
+	)
+	vbox.add_child(zslider)
+
+	var zval := Label.new()
+	zval.text = "1.0x"
+	zval.add_theme_font_size_override("font_size", 13)
+	zval.modulate = Color(1, 1, 1, 0.7)
+	zval.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	zslider.value_changed.connect(func(v: float):
+		zval.text = "%.1fx" % v
+	)
+	vbox.add_child(zval)
 
 
 func _update_tray() -> void:
@@ -440,6 +529,8 @@ func _on_match_resolved(face: int, cleared_cells: Array, gem_kind: int, _cascade
 func _spawn_shatter(face: int, pos: Vector2i, color: Color) -> void:
 	if face < 0 or face >= 6:
 		return
+	if not _debug_shatter:
+		return
 	var p := GPUParticles3D.new()
 	p.one_shot = true
 	p.emitting = true
@@ -478,6 +569,8 @@ func _spawn_shatter(face: int, pos: Vector2i, color: Color) -> void:
 ## cube center, striking the exact opposite face cell.
 func _spawn_antipodal_beam(origin_face: int, pos: Vector2i) -> void:
 	if origin_face < 0 or origin_face >= 6:
+		return
+	if not _debug_beam:
 		return
 	var target_face: int = ANTIPODE_FACE[origin_face]
 	var target_pos := pos
@@ -591,6 +684,8 @@ func _on_refresh_timer() -> void:
 func _spawn_shockwave(face: int, pos: Vector2i, color: Color) -> void:
 	if face < 0 or face >= 6:
 		return
+	if not _debug_shockwave:
+		return
 	var key := Vector3i(face, pos.x, pos.y)
 	var origin_local: Vector3 = _cell_local(pos.x, pos.y)
 	var fx := MeshInstance3D.new()
@@ -635,7 +730,54 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _touch_device:
 			_handle_click(event.position)
 	elif event is InputEventScreenTouch and event.pressed:
-		_handle_click(event.position)
+		_drag_start = event.position
+		_drag_gem_face = -1
+		_drag_gem_cell = Vector2i(-1, -1)
+		var hit := _pick_face_cell(event.position)
+		if not hit.is_empty():
+			_drag_gem_face = hit.face
+			_drag_gem_cell = Vector2i(hit.x, hit.y)
+	elif event is InputEventScreenTouch and not event.pressed:
+		_finalize_drag(event.position)
+	elif event is InputEventScreenDrag:
+		_update_drag(event.position)
+
+
+func _finalize_drag(final_pos: Vector2) -> void:
+	var delta = final_pos - _drag_start
+	if delta.length_squared() < 24 * 24: # tap threshold ~24px
+		_handle_click(final_pos)
+		return
+	# Drag — compute end cell
+	var end_hit = _pick_face_cell(final_pos)
+	if end_hit.is_empty():
+		return
+	var end_face = end_hit.face
+	var end_cell = Vector2i(end_hit.x, end_hit.y)
+	# Same face drag?
+	if _drag_gem_face >= 0 and end_face == _drag_gem_face:
+		var dx = int(end_cell.x) - int(_drag_gem_cell.x)
+		var dy = int(end_cell.y) - int(_drag_gem_cell.y)
+		if abs(dx) + abs(dy) == 1:
+			_attempt_swap(_drag_gem_face, _drag_gem_cell.x, _drag_gem_cell.y, end_cell.x, end_cell.y)
+		else:
+			# Deselect and reselect the new cell
+			_clear_selection()
+			selected = {"face": end_face, "x": end_cell.x, "y": end_cell.y}
+			_apply_selection_scale()
+	else:
+		# Drag started on empty area: camera turn.
+		# Simple heuristic: horizontal drag → yaw, vertical → pitch.
+		var dx = delta.x
+		var dy = delta.y
+		if abs(dx) > abs(dy):
+			_try_turn(sign(dx))
+		else:
+			_try_pitch(dy > 0)
+
+func _update_drag(pos: Vector2) -> void:
+	# No 3D preview needed; distance test on release decides tap vs swap.
+	pass
 
 
 func _try_turn(dir: int) -> void:
@@ -665,6 +807,11 @@ func _try_tumble(clockwise: bool) -> void:
 		return
 	_clear_selection()
 	var holder := holders[f]
+	if not _debug_facespin:
+		# Instant snap — no tween animation.
+		holder.transform = rest_transforms[f]
+		_on_refresh_timer()
+		return
 	var q0: Quaternion = holder.transform.basis.orthonormalized().get_rotation_quaternion()
 	var angle := deg_to_rad(90.0) * (1.0 if clockwise else -1.0)
 	var q1: Quaternion = (holder.transform.basis * Basis(Vector3(0, 0, 1), angle)) \
@@ -724,6 +871,8 @@ func _attempt_swap(face: int, ax: int, ay: int, bx: int, by: int) -> void:
 
 
 func _flash_reject(face: int, a: Vector2i, b: Vector2i) -> void:
+	if not _debug_selection:
+		return
 	for pos in [a, b]:
 		var key := Vector3i(face, pos.x, pos.y)
 		if not gem_nodes.has(key):
@@ -737,6 +886,8 @@ func _flash_reject(face: int, a: Vector2i, b: Vector2i) -> void:
 
 func _apply_selection_scale() -> void:
 	if selected.is_empty():
+		return
+	if not _debug_selection:
 		return
 	var key := Vector3i(int(selected.face), int(selected.x), int(selected.y))
 	if gem_nodes.has(key):
