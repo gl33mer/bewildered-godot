@@ -765,26 +765,47 @@ impl CubeSim {
     /// Set match mechanics config: enable/disable echo, antipodal, specials.
     /// Baseline mode (all false) = pure match-3/4/5 only.
     #[func]
-    fn set_match_config(&mut self, enable_echo: bool, enable_antipodal: bool, enable_specials: bool) {
+    fn set_match_config(&mut self, enable_echo: bool, enable_antipodal: bool, enable_specials: bool, enable_descent: bool) {
         if let Some(cube) = &mut self.cube {
             cube.set_match_config(MatchConfig {
                 enable_echo,
                 enable_antipodal,
                 enable_specials,
+                enable_descent,
             });
         }
     }
 
-    /// Preset: baseline (match-3/4/5 only, no echo/antipodal/specials).
+    /// Preset: baseline (match-3/4/5 only, no echo/antipodal/specials, no descent).
     #[func]
     fn set_match_config_baseline(&mut self) {
-        self.set_match_config(false, false, false);
+        self.set_match_config(false, false, false, false);
     }
 
-    /// Preset: full (all mechanics enabled).
+    /// Preset: vanilla (pure match-3/4/5 only, no special mechanics at all).
+    #[func]
+    fn set_match_config_vanilla(&mut self) {
+        self.set_match_config(false, false, false, false);
+    }
+
+    /// Preset: full (all mechanics enabled including descent).
     #[func]
     fn set_match_config_full(&mut self) {
-        self.set_match_config(true, true, true);
+        self.set_match_config(true, true, true, true);
+    }
+
+    /// Get current match config for debugging.
+    #[func]
+    fn get_match_config(&self) -> Dictionary {
+        if let Some(cube) = &self.cube {
+            let mut dict = Dictionary::new();
+            dict.set("enable_echo", cube.match_config.enable_echo);
+            dict.set("enable_antipodal", cube.match_config.enable_antipodal);
+            dict.set("enable_specials", cube.match_config.enable_specials);
+            dict.set("enable_descent", cube.match_config.enable_descent);
+            return dict;
+        }
+        Dictionary::new()
     }
 
     // --- Descent chamber lifecycle (Phase 6) ---

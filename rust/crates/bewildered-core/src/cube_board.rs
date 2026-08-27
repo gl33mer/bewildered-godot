@@ -33,6 +33,8 @@ pub struct MatchConfig {
     pub enable_echo: bool,
     pub enable_antipodal: bool,
     pub enable_specials: bool,
+    /// Enable roguelike descent system (chambers, relics, scoring, move limits).
+    pub enable_descent: bool,
 }
 
 impl Default for MatchConfig {
@@ -41,17 +43,39 @@ impl Default for MatchConfig {
             enable_echo: true,
             enable_antipodal: true,
             enable_specials: true,
+            enable_descent: true,
         }
     }
 }
 
 impl MatchConfig {
-    /// Baseline: only standard match-3/4/5, no echo, antipodal, specials.
+    /// Baseline: only standard match-3/4/5, no echo, antipodal, specials, no descent.
     pub fn baseline() -> Self {
         Self {
             enable_echo: false,
             enable_antipodal: false,
             enable_specials: false,
+            enable_descent: false,
+        }
+    }
+
+    /// Pure vanilla: only match-3/4/5 clears, no special mechanics at all.
+    pub fn vanilla() -> Self {
+        Self {
+            enable_echo: false,
+            enable_antipodal: false,
+            enable_specials: false,
+            enable_descent: false,
+        }
+    }
+
+    /// Full featured: all mechanics enabled.
+    pub fn full() -> Self {
+        Self {
+            enable_echo: true,
+            enable_antipodal: true,
+            enable_specials: true,
+            enable_descent: true,
         }
     }
 }

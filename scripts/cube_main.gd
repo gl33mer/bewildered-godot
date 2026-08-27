@@ -120,10 +120,22 @@ func start_descent(n: int) -> void:
 	face_size = clampi(n, 4, 10)
 	_build_chamber_visuals()
 
-	runner = DescentRunner.new()
-	runner.start_run(BOARD_SEED)
-	held_relics.clear()
-	_begin_chamber()
+	# Check if descent system is enabled.
+	var config := sim.get_match_config()
+	var descent_enabled := config.get("enable_descent", false)
+
+	if descent_enabled:
+		runner = DescentRunner.new()
+		runner.start_run(BOARD_SEED)
+		held_relics.clear()
+		_begin_chamber()
+	else:
+		# Vanilla mode: no descent, no relics, infinite moves.
+		runner = null
+		held_relics.clear()
+		sim.set_relic_modifiers(0, 0.0, 0)
+		# Infinite moves: set a very high number.
+		sim.set_moves_remaining(9999) if sim.has_method("set_moves_remaining") else pass
 
 
 ## Rebuild sim + faces for the current face_size and wire sim signals.
@@ -143,10 +155,16 @@ func _build_chamber_visuals() -> void:
 	# Baseline: pure match-3/4/5 only (no echo, antipodal, specials).
 	sim.set_match_config_baseline()
 	sim.cube_match_resolved.connect(_on_match_resolved)
-	sim.cube_echo_detonated.connect(_on_echo_detonated)
-	sim.antipodal_echo_charged.connect(_on_antipodal_charged)
-	sim.cube_special_gem_created.connect(_on_special_created)
-	sim.descent_chamber_finished.connect(_on_chamber_finished)
+	
+	# Only connect advanced signals if descent is enabled (they won't fire in baseline anyway,
+	# but this keeps the signal list clean for debugging).
+	var config := sim.get_match_config()
+	var descent_enabled := config.get("enable_descent", false)
+	if descent_enabled:
+		sim.cube_echo_detonated.connect(_on_echo_detonated)
+		sim.antipodal_echo_charged.connect(_on_antipodal_charged)
+		sim.cube_special_gem_created.connect(_on_special_created)
+		sim.descent_chamber_finished.connect(_on_chamber_finished)
 
 	faces_root = Node3D.new()
 	faces_root.name = "Faces"
@@ -159,6 +177,8 @@ func _build_chamber_visuals() -> void:
 
 ## Apply relic modifiers and start the runner's current chamber.
 func _begin_chamber() -> void:
+	if runner == null:
+		return
 	sim.set_relic_modifiers(
 		runner.get_echo_extra(), runner.get_score_pct(), runner.get_extra_moves())
 	sim.start_chamber(runner.get_chamber(), runner.get_chamber_seed())
@@ -328,8 +348,18 @@ func _build_hud() -> void:
 	status_label.add_theme_font_size_override("font_size", 20)
 	layer.add_child(status_label)
 
+	# Version/branch label (top-right) so testers know which build they're on.
+	var version_label := Label.new()
+	version_label.text = "v0.8-debug-basics"
+	version_label.add_theme_font_size_override("font_size", 13)
+	version_label.modulate = Color(1, 1, 1, 0.5)
+	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	version_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	version_label.position = Vector2(-16, 12)
+	layer.add_child(version_label)
+
 	var hint := Label.new()
-	hint.text = "A/D turn  ·  W/S pitch  ·  Q/E tumble  ·  Click swap  ·  1-4 board size  ·  R restart descent"
+	hint.text = "A/D turn  ·  W/S pitch  ·  Q/E tumble  ·  Click swap  ·  1-4 board size  ·  R restart"
 	hint.position = Vector2(16, 44)
 	hint.add_theme_font_size_override("font_size", 15)
 	hint.modulate = Color(1, 1, 1, 0.75)
@@ -668,6 +698,11 @@ func _schedule_refresh() -> void:
 
 
 func _on_chamber_finished(chamber: int, cleared: bool) -> void:
+	if runner == null:
+		# Vanilla mode: no descent system, just restart on R.
+		busy = false
+		_update_status("Match cleared! Press R to restart.")
+		return
 	busy = true
 	if cleared:
 		if chamber >= DESCENT_LENGTH:
@@ -681,6 +716,8 @@ func _on_chamber_finished(chamber: int, cleared: bool) -> void:
 
 
 func _on_relic_chosen(id: String) -> void:
+	if runner == null:
+		return
 	runner.choose_relic(id)
 	runner.advance_chamber()
 	relic_ui.hide_offers()
