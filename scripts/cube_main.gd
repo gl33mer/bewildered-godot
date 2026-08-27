@@ -121,8 +121,8 @@ func start_descent(n: int) -> void:
 	_build_chamber_visuals()
 
 	# Check if descent system is enabled.
-	var config := sim.get_match_config()
-	var descent_enabled := config.get("enable_descent", false)
+	var config: Dictionary = sim.get_match_config()
+	var descent_enabled: bool = config.get("enable_descent", false)
 
 	if descent_enabled:
 		runner = DescentRunner.new()
@@ -134,8 +134,9 @@ func start_descent(n: int) -> void:
 		runner = null
 		held_relics.clear()
 		sim.set_relic_modifiers(0, 0.0, 0)
-		# Infinite moves: set a very high number.
-		sim.set_moves_remaining(9999) if sim.has_method("set_moves_remaining") else pass
+		# Infinite moves: set a very high number if method exists.
+		if sim.has_method("set_moves_remaining"):
+			sim.set_moves_remaining(9999)
 
 
 ## Rebuild sim + faces for the current face_size and wire sim signals.
@@ -158,8 +159,8 @@ func _build_chamber_visuals() -> void:
 	
 	# Only connect advanced signals if descent is enabled (they won't fire in baseline anyway,
 	# but this keeps the signal list clean for debugging).
-	var config := sim.get_match_config()
-	var descent_enabled := config.get("enable_descent", false)
+	var config: Dictionary = sim.get_match_config()
+	var descent_enabled: bool = config.get("enable_descent", false)
 	if descent_enabled:
 		sim.cube_echo_detonated.connect(_on_echo_detonated)
 		sim.antipodal_echo_charged.connect(_on_antipodal_charged)
