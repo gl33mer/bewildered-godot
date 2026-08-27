@@ -137,6 +137,9 @@ func start_descent(n: int) -> void:
 		# Infinite moves: set a very high number if method exists.
 		if sim.has_method("set_moves_remaining"):
 			sim.set_moves_remaining(9999)
+	
+	# Render initial board state.
+	_refresh_all()
 
 
 ## Rebuild sim + faces for the current face_size and wire sim signals.
