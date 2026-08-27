@@ -964,6 +964,8 @@ func _attempt_swap(face: int, ax: int, ay: int, bx: int, by: int) -> void:
 	var gem_b: MeshInstance3D = gem_nodes[key_b]
 	var pos_a := gem_a.position
 	var pos_b := gem_b.position
+	# DEBUG
+	print("_attempt_swap: face=", face, " ax=", ax, " ay=", ay, " bx=", bx, " by=", by)
 	# Animate the visual swap.
 	var tw := create_tween()
 	tw.set_parallel(true)
@@ -971,7 +973,9 @@ func _attempt_swap(face: int, ax: int, ay: int, bx: int, by: int) -> void:
 	tw.tween_property(gem_b, "position", pos_a, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.finished.connect(func():
 		# After visual swap, apply the logical swap.
-		if sim.try_face_swap(face, ax, ay, bx, by):
+		var success = sim.try_face_swap(face, ax, ay, bx, by)
+		print("_attempt_swap: try_face_swap result=", success)
+		if success:
 			# Clear animations arrive via cube_match_resolved; refresh timer unlocks.
 			pass
 		else:
@@ -1036,12 +1040,26 @@ func _pick_face_cell(screen_pos: Vector2) -> Dictionary:
 	if not body.has_meta("face_id"):
 		return {}
 	var face: int = body.get_meta("face_id")
-	var local := holders[face].to_local(result.position)
+	# Use rest_transforms for coordinate mapping to avoid issues during face rotations.
+	# Compute local coordinates manually using inverse transform: basis^T * (pos - origin)
+	var rest := rest_transforms[face]
+	var basis := rest.basis
+	var origin := rest.origin
+	var diff_vec: Vector3 = result.position - origin
+	# For orthonormal basis, inverse = transpose. Transposed basis applied to v:
+	# (basis.x.dot(v), basis.y.dot(v), basis.z.dot(v))
+	var local := Vector3(
+		basis.x.dot(diff_vec),
+		basis.y.dot(diff_vec),
+		basis.z.dot(diff_vec)
+	)
 	# Small epsilon to handle floating-point precision at cell boundaries.
 	const EPS := 0.0001
 	var half := face_size * 0.5
 	var x := clampi(int(floor(local.x / CELL + half + EPS)), 0, face_size - 1)
 	var y := clampi(int(floor(local.y / CELL + half + EPS)), 0, face_size - 1)
+	# DEBUG
+	print("_pick_face_cell: screen_pos=", screen_pos, " face=", face, " local=(", local.x, ",", local.y, ") x=", x, " y=", y)
 	return {"face": face, "x": x, "y": y}
 
 

@@ -651,4 +651,65 @@ mod tests {
 
         assert!(board.find_matches().is_empty(), "iced gem must break the run");
     }
+
+/// Test that a horizontal row of 3 on a single face is detected as a match.
+    #[test]
+    fn test_horizontal_row_match_single_face() {
+        let n = 6;
+        let mut board = CubeBoard::new(n, 42, kinds());
+        
+        // Clear the board first
+        for i in 0..board.cells.len() {
+            board.cells[i] = None;
+        }
+        
+        // Helper to set a gem
+        let set = |board: &mut CubeBoard, face: usize, x: usize, y: usize, kind: GemKind| {
+            let i = board.cell(face, x, y).0 as usize;
+            board.cells[i] = Some(Gem::simple(kind));
+        };
+        
+        // Plant a horizontal row of 3 at face 0, row 2 (y=2)
+        for x in 0..3 {
+            set(&mut board, 0, x, 2, GemKind::Circle);
+        }
+        
+        // Fill rest of face 0 with different kinds to avoid accidental matches
+        for y in 0..n {
+            for x in 0..n {
+                if !(y == 2 && x < 3) {
+                    set(&mut board, 0, x, y, GemKind::Triangle);
+                }
+            }
+        }
+        
+        // Fill other faces with non-matching gems
+        for face in 1..6 {
+            for y in 0..n {
+                for x in 0..n {
+                    set(&mut board, face, x, y, GemKind::Square);
+                }
+            }
+        }
+        
+        // Verify matches found
+        let runs = board.find_matches();
+        eprintln!("Runs found: {:?}", runs);
+        assert!(!runs.is_empty(), "Should find at least one run");
+        
+        // Should find exactly one run of 3 Circles on face 0
+        let matching_runs: Vec<_> = runs.iter()
+            .filter(|(cells, kind)| *kind == GemKind::Circle && cells.len() == 3)
+            .collect();
+        assert_eq!(matching_runs.len(), 1, "Should find exactly one 3-match of Circles, found {}", matching_runs.len());
+        
+        // Verify the cells are on face 0, row 2, columns 0,1,2
+        let (cells, _) = &matching_runs[0];
+        let coords: Vec<_> = cells.iter().map(|c| board.coords(*c)).collect();
+        eprintln!("Matching cells coords: {:?}", coords);
+        assert!(coords.iter().all(|(f, _x, _y)| *f == 0), "All cells should be on face 0");
+        assert!(coords.iter().all(|(_f, _x, y)| *y == 2), "All cells should be on row 2");
+        assert_eq!(coords.len(), 3, "Should have 3 cells in the run");
+    }
+
 }
