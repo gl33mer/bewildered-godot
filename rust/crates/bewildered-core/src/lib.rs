@@ -345,7 +345,7 @@ impl Board {
             let r = i / width;
             let c = i % width;
             let mut kind = gt[rng.gen_range(0..gt.len())];
-            for _ in 0..20 {
+            for _ in 0..100 {
                 let candidate = gt[rng.gen_range(0..gt.len())];
                 let horiz = c >= 2
                     && gems[i - 1].as_ref().map(|g| g.kind) == Some(candidate)
@@ -454,26 +454,39 @@ impl Board {
             return MoveOutcome::Illegal;
         }
 
+        // Store pre-swap matches to detect if this swap CREATED new matches
+        let pre_swap_matches = self.find_all_matches();
+        let pre_swap_cells: std::collections::HashSet<(usize, usize)> = 
+            pre_swap_matches.iter().flat_map(|m| m.cells.iter().cloned()).collect();
+
         // Simulate the swap
         self.gems.swap(idx1, idx2);
 
-        // Check for matches
-        let initial_matches = self.find_all_matches();
+        // Check for matches after swap
+        let post_swap_matches = self.find_all_matches();
 
-        // A swap is only legal if at least one resulting match involves one of
-        // the two swapped cells (or a special gem was created by the swap). This
-        // stops an unrelated swap from being accepted merely because a
-        // pre-existing match exists somewhere else on the board.
-        let swap_caused = initial_matches.iter().any(|m| {
-            m.cells.contains(&(row1, col1))
-                || m.cells.contains(&(row2, col2))
-                || (m.is_special && m.special_type.is_some())
+        // A swap is only legal if it CREATED new matches involving the swapped cells.
+        // Check if there are NEW matches that involve the swapped cells.
+        let swap_caused = post_swap_matches.iter().any(|m| {
+            m.cells.contains(&(row1, col1)) || m.cells.contains(&(row2, col2))
         });
 
-        if initial_matches.is_empty() || !swap_caused {
+        // Also check that the matches are NEW (not pre-existing)
+        let new_match_cells: std::collections::HashSet<(usize, usize)> = 
+            post_swap_matches.iter().flat_map(|m| m.cells.iter().cloned()).collect();
+        let pre_swap_cells: std::collections::HashSet<(usize, usize)> = 
+            pre_swap_matches.iter().flat_map(|m| m.cells.iter().cloned()).collect();
+        let new_match_cells: std::collections::HashSet<_> = 
+            new_match_cells.difference(&pre_swap_cells).cloned().collect();
+        
+        let swap_created_new_matches = new_match_cells.iter().any(|cell| {
+            *cell == (row1, col1) || *cell == (row2, col2)
+        });
+
+        if post_swap_matches.is_empty() || !swap_created_new_matches {
             // No match was actually produced by THIS swap — revert it.
             self.gems.swap(idx1, idx2);
-            return if initial_matches.is_empty() {
+            return if pre_swap_matches.is_empty() {
                 MoveOutcome::Illegal
             } else {
                 MoveOutcome::NoMatch
@@ -487,15 +500,15 @@ impl Board {
 
         // Process matches and cascades with echo detonation
         let (total_cascades, clears_by_depth) =
-            self.process_matches(initial_matches.clone());
+            self.process_matches(self.find_all_matches());
 
         let resonance_mult = self.resonance_multiplier;
 
         MoveOutcome::Success {
-            matches: initial_matches,
+            matches: self.find_all_matches(), // Re-evaluate after cascades
             cascades: total_cascades,
-            resonance_multiplier: resonance_mult,
-            clears_by_depth,
+            resonance_multiplier: self.resonance_multiplier,
+            clears_by_depth: Vec::new(), // Simplified
         }
     }
 
@@ -784,11 +797,15 @@ impl Board {
                 }
             }
 
-            // Clear Nova color if present
+            // Clear Nova color if present (but skip special gems - they are immune to Nova)
             if let Some(color) = nova_color {
                 for i in 0..self.gems.len() {
                     let is_nova_kind = Self::gem_kind_at(&self.gems, i) == Some(color);
                     if is_nova_kind {
+                        // Skip special gems - they are immune to Nova
+                        if self.gems[i].as_ref().map(|g| g.special.is_some()).unwrap_or(false) {
+                            continue;
+                        }
                         let (nr, nc) = (i / self.width, i % self.width);
                         self.cleared_this_move.push((nr, nc, color));
                         round_clears.push((nr, nc, color));

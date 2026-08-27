@@ -403,8 +403,10 @@ func _cell_to_grid_coords(pos: Vector2) -> Vector2i:
 	var local_y = pos.y - offset_y
 
 	var stride: float = cell_size + padding
-	var x = int(floor(local_x / stride))
-	var y = int(floor(local_y / stride))
+	# Add a small epsilon to handle boundary precision issues
+	const EPS := 0.0001
+	var x = int(floor((local_x + EPS) / stride))
+	var y = int(floor((local_y + EPS) / stride))
 
 	if x >= 0 && x < board_width && y >= 0 && y < board_height:
 		return Vector2i(x, y)
@@ -580,6 +582,11 @@ func _run_cascade_sequence() -> void:
 		_settle_board()
 		return
 
+	# Check if addons are enabled (vanilla mode = no special effects)
+	var config := sim.get_match_config()
+	var descent_enabled := config.get("enable_descent", false)
+	var addons_enabled := config.get("enable_specials", false) or config.get("enable_echo", false) or config.get("enable_antipodal", false)
+
 	for entry in _pending_cascade_clears:
 		var cells: Array[Vector2i] = entry["cells"]
 		var kind: int = entry["kind"]
@@ -587,19 +594,34 @@ func _run_cascade_sequence() -> void:
 		if cells.is_empty():
 			continue
 
-		# 1) Special-elimination FX must play BEFORE the wave clears.
-		var fx_time := _play_special_activations(cells, kind)
-		if fx_time > 0.0:
-			await get_tree().create_timer(fx_time).timeout
+		# Skip special effects if addons are disabled (vanilla mode)
+		if addons_enabled:
+			# 1) Special-elimination FX must play BEFORE the wave clears.
+			var fx_time := _play_special_activations(cells, kind)
+			if fx_time > 0.0:
+				await get_tree().create_timer(fx_time).timeout
 
-		# 2) Shrink/fade these gems + escalating chime (0.15s).
-		audio_manager.play_match(depth)
-		var clear_time := _animate_clear(cells, kind)
-		if clear_time > 0.0:
-			await get_tree().create_timer(clear_time).timeout
+			# 2) Shrink/fade these gems + escalating chime (0.15s).
+			audio_manager.play_match(depth)
+			var clear_time := _animate_clear(cells, kind)
+			if clear_time > 0.0:
+				await get_tree().create_timer(clear_time).timeout
 
-		# 3) Let the eye register the newly formed cascade.
-		await get_tree().create_timer(CASCADE_STEP_PAUSE).timeout
+			# 3) Let the eye register the newly formed cascade.
+			await get_tree().create_timer(CASCADE_STEP_PAUSE).timeout
+		else:
+			# Vanilla mode: just clear the cells without special effects
+			for cell in cells:
+				var idx = cell.y * board_width + cell.x
+				if idx < gem_instances.size():
+					var gem = gem_instances[idx]
+					if gem != null && is_instance_valid(gem):
+						var tween = create_tween()
+						tween.tween_property(gem, "scale", Vector2(0, 0), CLEAR_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+						tween.tween_property(gem, "modulate:a", 0.0, CLEAR_ANIM_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+						tween.finished.connect(gem.queue_free.bind())
+			# Still need to wait for clear animation
+			await get_tree().create_timer(CLEAR_ANIM_DURATION).timeout
 
 	# Gravity slide: existing gems fall into the voids (0.18s).
 	var fall_time := _compact_gravity()
@@ -731,7 +753,12 @@ func refresh_board() -> void:
 					add_child(gem_instance)
 					gem_instances[idx] = gem_instance
 				
-				var special = cell.get("special", 0)
+				# In vanilla mode (addons disabled), ignore special gems
+				var config := board_sim.get_match_config()
+				var addons_enabled := config.get("enable_specials", false) or config.get("enable_echo", false) or config.get("enable_antipodal", false)
+				var special = 0
+				if addons_enabled:
+					special = cell.get("special", 0)
 				gem_instance.set_gem_state(cell.kind, cell.has_echo, special, cell.get("blocker", 0))
 
 				var pos = _get_cell_position(x, y)

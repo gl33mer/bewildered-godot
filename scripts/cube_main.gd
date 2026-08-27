@@ -352,14 +352,16 @@ func _build_hud() -> void:
 	status_label.add_theme_font_size_override("font_size", 20)
 	layer.add_child(status_label)
 
-	# Version/branch label (top-right) so testers know which build they're on.
+	# Version/branch label (top-center) so testers know which build they're on.
 	var version_label := Label.new()
 	version_label.text = "v0.8-debug-basics"
-	version_label.add_theme_font_size_override("font_size", 13)
-	version_label.modulate = Color(1, 1, 1, 0.5)
-	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	version_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	version_label.position = Vector2(-16, 12)
+	version_label.add_theme_font_size_override("font_size", 18)
+	version_label.modulate = Color(1, 1, 1, 0.9)
+	version_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	version_label.add_theme_constant_override("outline_size", 2)
+	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	version_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_CENTER)
+	version_label.position = Vector2(0, 12)
 	layer.add_child(version_label)
 
 	var hint := Label.new()
@@ -789,6 +791,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _touch_device:
 			_handle_click(event.position)
 	elif event is InputEventScreenTouch and event.pressed:
+		# Ignore touch input if busy or camera is turning.
+		if busy or camera.is_turning():
+			return
 		# Pinch-to-zoom: track first two fingers.
 		if _pinch_touch1 == -1:
 			_pinch_touch1 = event.index
@@ -964,8 +969,8 @@ func _attempt_swap(face: int, ax: int, ay: int, bx: int, by: int) -> void:
 	var gem_b: MeshInstance3D = gem_nodes[key_b]
 	var pos_a := gem_a.position
 	var pos_b := gem_b.position
-	# DEBUG
-	print("_attempt_swap: face=", face, " ax=", ax, " ay=", ay, " bx=", bx, " by=", by)
+	# DEBUG - use push_error for guaranteed logcat output
+	push_error("_attempt_swap: face=", face, " ax=", ax, " ay=", ay, " bx=", bx, " by=", by)
 	# Animate the visual swap.
 	var tw := create_tween()
 	tw.set_parallel(true)
