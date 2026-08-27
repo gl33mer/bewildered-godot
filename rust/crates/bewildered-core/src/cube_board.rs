@@ -288,7 +288,7 @@ impl CubeBoard {
 
             // Echo detonation (optional).
             if self.match_config.enable_echo {
-                for (run, _kind) in &current_runs {
+                for (run, kind) in &current_runs {
                     let echoed: Vec<CellId> = run
                         .iter()
                         .filter(|c| {
@@ -321,6 +321,7 @@ impl CubeBoard {
                                         }
                                         outcome.antipodal_charged.push(anti);
                                         fresh_charges.push(anti);
+                                    } else {
                                     }
                                 }
                             }
@@ -431,21 +432,23 @@ impl CubeBoard {
                 }
             }
 
-            if self.match_config.enable_echo {
-                for c in &fresh_charges {
-                    if let Some(gem) = self.cells.get_mut(c.0 as usize).and_then(|s| s.as_mut()) {
-                        if let Some(echo) = &mut gem.echo {
-                            echo.moves_left = echo.moves_left.saturating_sub(1);
-                            if echo.moves_left == 0 {
-                                gem.echo = None;
-                            }
+            current_runs = self.find_matches();
+        }
+
+        // Decrement echo charges ONCE at the end of the move (not per cascade).
+        // fresh_charges accumulates all cells seeded with echoes during this move.
+        if self.match_config.enable_echo {
+            for c in &fresh_charges {
+                if let Some(gem) = self.cells.get_mut(c.0 as usize).and_then(|s| s.as_mut()) {
+                    if let Some(echo) = &mut gem.echo {
+                        echo.moves_left = echo.moves_left.saturating_sub(1);
+                        if echo.moves_left == 0 {
+                            gem.echo = None;
                         }
                     }
                 }
-                fresh_charges.retain(|c| self.get(*c).and_then(|g| g.echo.as_ref()).is_some());
             }
-
-            current_runs = self.find_matches();
+            fresh_charges.retain(|c| self.get(*c).and_then(|g| g.echo.as_ref()).is_some());
         }
 
         outcome.resonance_multiplier = self.resonance_multiplier;
@@ -555,6 +558,7 @@ mod tests {
         assert!(!outcome.antipodal_charged.is_empty());
         for anti in &outcome.antipodal_charged {
             assert_eq!(board.face_of(*anti), 2, "shockwave must strike the Back face");
+            let cell_idx = anti.0 as usize;
             let gem = board.get(*anti).expect("antipodal cell occupied");
             assert!(gem.echo.is_some());
         }

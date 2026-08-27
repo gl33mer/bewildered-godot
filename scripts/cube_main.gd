@@ -996,8 +996,11 @@ func _pick_face_cell(screen_pos: Vector2) -> Dictionary:
 		return {}
 	var face: int = body.get_meta("face_id")
 	var local := holders[face].to_local(result.position)
-	var x := clampi(int(floor(local.x / CELL + face_size * 0.5)), 0, face_size - 1)
-	var y := clampi(int(floor(local.y / CELL + face_size * 0.5)), 0, face_size - 1)
+	# Small epsilon to handle floating-point precision at cell boundaries.
+	const EPS := 0.0001
+	var half := face_size * 0.5
+	var x := clampi(int(floor(local.x / CELL + half + EPS)), 0, face_size - 1)
+	var y := clampi(int(floor(local.y / CELL + half + EPS)), 0, face_size - 1)
 	return {"face": face, "x": x, "y": y}
 
 
