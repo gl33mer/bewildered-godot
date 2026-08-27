@@ -1,5 +1,5 @@
 use godot::prelude::*;
-use bewildered_core::{Blocker, Board, CubeBoard, CubeOutcome, DescentRun, GemKind, MoveOutcome, Relic, RuleModifiers, SpecialGem};
+use bewildered_core::{Blocker, Board, CubeBoard, CubeOutcome, DescentRun, GemKind, MatchConfig, MoveOutcome, Relic, RuleModifiers, SpecialGem};
 use bewildered_content::{BlockerKind, Level, Objective};
 use std::collections::HashMap;
 
@@ -760,6 +760,31 @@ impl CubeSim {
     #[func]
     fn is_ready(&self) -> bool {
         self.cube.is_some()
+    }
+
+    /// Set match mechanics config: enable/disable echo, antipodal, specials.
+    /// Baseline mode (all false) = pure match-3/4/5 only.
+    #[func]
+    fn set_match_config(&mut self, enable_echo: bool, enable_antipodal: bool, enable_specials: bool) {
+        if let Some(cube) = &mut self.cube {
+            cube.set_match_config(MatchConfig {
+                enable_echo,
+                enable_antipodal,
+                enable_specials,
+            });
+        }
+    }
+
+    /// Preset: baseline (match-3/4/5 only, no echo/antipodal/specials).
+    #[func]
+    fn set_match_config_baseline(&mut self) {
+        self.set_match_config(false, false, false);
+    }
+
+    /// Preset: full (all mechanics enabled).
+    #[func]
+    fn set_match_config_full(&mut self) {
+        self.set_match_config(true, true, true);
     }
 
     // --- Descent chamber lifecycle (Phase 6) ---

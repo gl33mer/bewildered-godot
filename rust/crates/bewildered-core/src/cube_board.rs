@@ -27,6 +27,35 @@ pub struct CubeOutcome {
     pub specials_created: Vec<(CellId, GemKind, SpecialGem)>,
 }
 
+/// Configuration flags for optional match mechanics (debug/baseline mode).
+#[derive(Debug, Clone, Copy)]
+pub struct MatchConfig {
+    pub enable_echo: bool,
+    pub enable_antipodal: bool,
+    pub enable_specials: bool,
+}
+
+impl Default for MatchConfig {
+    fn default() -> Self {
+        Self {
+            enable_echo: true,
+            enable_antipodal: true,
+            enable_specials: true,
+        }
+    }
+}
+
+impl MatchConfig {
+    /// Baseline: only standard match-3/4/5, no echo, antipodal, specials.
+    pub fn baseline() -> Self {
+        Self {
+            enable_echo: false,
+            enable_antipodal: false,
+            enable_specials: false,
+        }
+    }
+}
+
 /// A six-face match-3 board. Cell space is the flat `CellId` space of
 /// [`Cube6Face`]: `face * N * N + y * N + x`,
 /// faces ordered 0=Front, 1=Right, 2=Back, 3=Left, 4=Top, 5=Bottom.
@@ -46,10 +75,25 @@ pub struct CubeBoard {
     pub score_bonus_pct: f32,
     /// Relic bonus: extra moves granted at chamber start (run-layer).
     pub extra_moves: u8,
+    /// Optional match mechanics config.
+    pub match_config: MatchConfig,
 }
 
 impl CubeBoard {
     pub fn new(face_size: usize, seed: u64, gem_types: Vec<GemKind>) -> Self {
+        Self::with_config(face_size, seed, gem_types, MatchConfig::default())
+    }
+
+    pub fn new_baseline(face_size: usize, seed: u64, gem_types: Vec<GemKind>) -> Self {
+        Self::with_config(face_size, seed, gem_types, MatchConfig::baseline())
+    }
+
+    pub fn with_config(
+        face_size: usize,
+        seed: u64,
+        gem_types: Vec<GemKind>,
+        match_config: MatchConfig,
+    ) -> Self {
         let topology = Cube6Face::new(face_size);
         let mut board = Self {
             cells: vec![None; topology.cell_count()],
@@ -63,9 +107,14 @@ impl CubeBoard {
             echo_extra_moves: 0,
             score_bonus_pct: 0.0,
             extra_moves: 0,
+            match_config,
         };
         board.fill_random_match_free();
         board
+    }
+
+    pub fn set_match_config(&mut self, config: MatchConfig) {
+        self.match_config = config;
     }
 
     /// Cell handle for face-local coordinates.
@@ -225,10 +274,6 @@ impl CubeBoard {
             specials_created: Vec::new(),
         };
         let mut current_runs = std::mem::take(initial_runs);
-        // Cells whose echo charge was seeded during THIS move (cleared cells,
-        // antipodal targets). Per the Resonance Echo rule these charges stay
-        // dormant until the next turn — they never chain-detonate in the
-        // same move's cascades.
         let mut fresh_charges: Vec<CellId> = Vec::new();
 
         loop {
@@ -241,48 +286,55 @@ impl CubeBoard {
             let mut extra_clears: Vec<CellId> = Vec::new();
             let mut nova_kind: Option<GemKind> = None;
 
-            for (run, kind) in &current_runs {
-                // Echo detonation: any echoed gem in the run fires a shockwave
-                // ring (orthogonal neighbours) and charges the antipode.
-                let echoed: Vec<CellId> = run
-                    .iter()
-                    .filter(|c| {
-                        if fresh_charges.contains(c) {
-                            return false; // dormant until next turn
-                        }
-                        self.get(**c).and_then(|g| g.echo.as_ref()).is_some()
-                    })
-                    .copied()
-                    .collect();
-                if !echoed.is_empty() {
-                    self.resonance_stack += 1;
-                    self.resonance_multiplier = (1.5
-                        + (self.resonance_stack.saturating_sub(1) as f32 * 0.5))
-                        .min(4.0);
+            // Echo detonation (optional).
+            if self.match_config.enable_echo {
+                for (run, _kind) in &current_runs {
+                    let echoed: Vec<CellId> = run
+                        .iter()
+                        .filter(|c| {
+                            if fresh_charges.contains(c) {
+                                return false;
+                            }
+                            self.get(**c).and_then(|g| g.echo.as_ref()).is_some()
+                        })
+                        .copied()
+                        .collect();
+                    if !echoed.is_empty() {
+                        self.resonance_stack += 1;
+                        self.resonance_multiplier = (1.5
+                            + (self.resonance_stack.saturating_sub(1) as f32 * 0.5))
+                            .min(4.0);
 
-                    for origin in &echoed {
-                        outcome.echoes_detonated.push(*origin);
-                        for nb in self.neighbors(*origin) {
-                            extra_clears.push(nb);
-                        }
-                        if let Some(anti) = self.topology.antipode(*origin) {
-                            if let Some(gem) = self.cells.get_mut(anti.0 as usize).and_then(|s| s.as_mut()) {
-                                if let Some(echo) = &mut gem.echo {
-                                    echo.moves_left = echo.moves_left.max(2);
-                                } else {
-                                    gem.echo = Some(EchoCharge::with_duration(2));
+                        for origin in &echoed {
+                            outcome.echoes_detonated.push(*origin);
+                            // Antipodal charging (optional).
+                            if self.match_config.enable_antipodal {
+                                for nb in self.neighbors(*origin) {
+                                    extra_clears.push(nb);
                                 }
-                                outcome.antipodal_charged.push(anti);
-                                fresh_charges.push(anti);
+                                if let Some(anti) = self.topology.antipode(*origin) {
+                                    if let Some(gem) = self.cells.get_mut(anti.0 as usize).and_then(|s| s.as_mut()) {
+                                        if let Some(echo) = &mut gem.echo {
+                                            echo.moves_left = echo.moves_left.max(2);
+                                        } else {
+                                            gem.echo = Some(EchoCharge::with_duration(2));
+                                        }
+                                        outcome.antipodal_charged.push(anti);
+                                        fresh_charges.push(anti);
+                                    }
+                                }
                             }
                         }
                     }
                 }
+            }
 
-                // Special creation: 4-run -> Bolt, 5+-run -> Nova. The special
-                // gem persists at the middle of the run.
-                if run.len() >= 5 {
-                    nova_kind = Some(*kind);
+            // Special creation: 4-run -> Bolt, 5+-run -> Nova (optional).
+            if self.match_config.enable_specials {
+                for (run, kind) in &current_runs {
+                    if run.len() >= 5 {
+                        nova_kind = Some(*kind);
+                    }
                 }
             }
 
@@ -314,13 +366,15 @@ impl CubeBoard {
             let mut pending_echo_cells: Vec<CellId> = Vec::new();
             let mut specials_to_place: Vec<(CellId, GemKind, SpecialGem)> = Vec::new();
 
-            for (run, kind) in &current_runs {
-                if run.len() == 4 {
-                    let mid = run[2];
-                    specials_to_place.push((mid, *kind, SpecialGem::Bolt { horizontal: true }));
-                } else if run.len() >= 5 {
-                    let mid = run[run.len() / 2];
-                    specials_to_place.push((mid, *kind, SpecialGem::Nova));
+            if self.match_config.enable_specials {
+                for (run, kind) in &current_runs {
+                    if run.len() == 4 {
+                        let mid = run[2];
+                        specials_to_place.push((mid, *kind, SpecialGem::Bolt { horizontal: true }));
+                    } else if run.len() >= 5 {
+                        let mid = run[run.len() / 2];
+                        specials_to_place.push((mid, *kind, SpecialGem::Nova));
+                    }
                 }
             }
 
@@ -345,13 +399,15 @@ impl CubeBoard {
                     }
                 }
             }
-            for (cell, kind, special) in specials_to_place {
-                let idx = cell.0 as usize;
-                if idx < self.cells.len() {
-                    let mut gem = Gem::simple(kind);
-                    gem.special = Some(special);
-                    self.cells[idx] = Some(gem);
-                    outcome.specials_created.push((cell, kind, special));
+            if self.match_config.enable_specials {
+                for (cell, kind, special) in specials_to_place {
+                    let idx = cell.0 as usize;
+                    if idx < self.cells.len() {
+                        let mut gem = Gem::simple(kind);
+                        gem.special = Some(special);
+                        self.cells[idx] = Some(gem);
+                        outcome.specials_created.push((cell, kind, special));
+                    }
                 }
             }
 
@@ -366,11 +422,27 @@ impl CubeBoard {
                 if self.cells[i].is_none() {
                     let mut gem = self.random_gem();
                     if pending.binary_search(&CellId(i as u32)).is_ok() {
-                        gem.echo = Some(EchoCharge::with_duration(1 + self.echo_extra_moves));
-                        fresh_charges.push(CellId(i as u32));
+                        if self.match_config.enable_echo {
+                            gem.echo = Some(EchoCharge::with_duration(1 + self.echo_extra_moves));
+                            fresh_charges.push(CellId(i as u32));
+                        }
                     }
                     self.cells[i] = Some(gem);
                 }
+            }
+
+            if self.match_config.enable_echo {
+                for c in &fresh_charges {
+                    if let Some(gem) = self.cells.get_mut(c.0 as usize).and_then(|s| s.as_mut()) {
+                        if let Some(echo) = &mut gem.echo {
+                            echo.moves_left = echo.moves_left.saturating_sub(1);
+                            if echo.moves_left == 0 {
+                                gem.echo = None;
+                            }
+                        }
+                    }
+                }
+                fresh_charges.retain(|c| self.get(*c).and_then(|g| g.echo.as_ref()).is_some());
             }
 
             current_runs = self.find_matches();

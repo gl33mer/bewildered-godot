@@ -59,6 +59,8 @@ var _drag_gem_cell := Vector2i(-1, -1)
 # Pinch-to-zoom tracking.
 var _pinch_touch1 := -1
 var _pinch_touch2 := -1
+var _pinch_touch1_pos := Vector2.ZERO
+var _pinch_touch2_pos := Vector2.ZERO
 var _pinch_start_dist := 0.0
 var _pinch_start_zoom := 1.0
 var _debug_shatter := false
@@ -138,6 +140,8 @@ func _build_chamber_visuals() -> void:
 
 	sim = CubeSim.new()
 	sim.new_cube_board(face_size, BOARD_SEED)
+	# Baseline: pure match-3/4/5 only (no echo, antipodal, specials).
+	sim.set_match_config_baseline()
 	sim.cube_match_resolved.connect(_on_match_resolved)
 	sim.cube_echo_detonated.connect(_on_echo_detonated)
 	sim.antipodal_echo_charged.connect(_on_antipodal_charged)
@@ -176,22 +180,29 @@ func _build_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.7
+	env.ambient_light_energy = 1.2
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
 
+	# Three balanced lights for even face illumination.
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52.0, 32.0, 0.0)
-	sun.light_energy = 1.25
+	sun.rotation_degrees = Vector3(-45.0, 30.0, 0.0)
+	sun.light_energy = 1.0
 	sun.shadow_enabled = true
 	add_child(sun)
 
-	var fill := DirectionalLight3D.new()
-	fill.rotation_degrees = Vector3(30.0, -140.0, 0.0)
-	fill.light_energy = 0.35
-	fill.shadow_enabled = false
-	add_child(fill)
+	var fill1 := DirectionalLight3D.new()
+	fill1.rotation_degrees = Vector3(45.0, -150.0, 0.0)
+	fill1.light_energy = 0.5
+	fill1.shadow_enabled = false
+	add_child(fill1)
+
+	var fill2 := DirectionalLight3D.new()
+	fill2.rotation_degrees = Vector3(-45.0, -30.0, 0.0)
+	fill2.light_energy = 0.5
+	fill2.shadow_enabled = false
+	add_child(fill2)
 
 
 func _build_materials() -> void:
@@ -740,11 +751,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Pinch-to-zoom: track first two fingers.
 		if _pinch_touch1 == -1:
 			_pinch_touch1 = event.index
+			_pinch_touch1_pos = event.position
 		elif _pinch_touch2 == -1 and event.index != _pinch_touch1:
 			_pinch_touch2 = event.index
-			var p1: Vector2 = get_viewport().get_mouse_position()
-			var p2: Vector2 = event.position
-			_pinch_start_dist = p1.distance_to(p2)
+			_pinch_touch2_pos = event.position
+			_pinch_start_dist = _pinch_touch1_pos.distance_to(_pinch_touch2_pos)
 			_pinch_start_zoom = camera.zoom_factor
 		# Also handle drag/swipe on first finger.
 		if event.index == _pinch_touch1:
@@ -766,21 +777,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventScreenDrag:
 		# Update pinch zoom if two fingers.
 		if _pinch_touch1 != -1 and _pinch_touch2 != -1:
-			# One of the fingers moved - update zoom.
-			var touches: Array[Vector2] = []
-			for i in range(get_viewport().get_touch_count()):
-				touches.append(get_viewport().get_touch_position(i))
-			if touches.size() >= 2:
-				var d: float = touches[0].distance_to(touches[1])
-				var factor := d / _pinch_start_dist
-				var new_zoom := clampf(_pinch_start_zoom * factor, 0.5, 2.0)
-				camera.set_zoom_factor(new_zoom)
-				# Update the HUD slider if it exists.
-				var panel := get_node_or_null("CanvasLayer/DebugEffects")
-				if panel:
-					var slider := panel.find_child("HSlider")
-					if slider:
-						slider.value = new_zoom
+			# Check if this drag event is from one of our tracked fingers.
+			if event.index == _pinch_touch1:
+				_pinch_touch1_pos = event.position
+			elif event.index == _pinch_touch2:
+				_pinch_touch2_pos = event.position
+			var d: float = _pinch_touch1_pos.distance_to(_pinch_touch2_pos)
+			var factor := d / _pinch_start_dist
+			var new_zoom := clampf(_pinch_start_zoom * factor, 0.5, 2.0)
+			camera.set_zoom_factor(new_zoom)
+			# Update the HUD slider if it exists.
+			var panel := get_node_or_null("CanvasLayer/DebugEffects")
+			if panel:
+				var slider := panel.find_child("HSlider")
+				if slider:
+					slider.value = new_zoom
 		else:
 			_update_drag(event.position)
 
@@ -792,11 +803,12 @@ func _finalize_drag(final_pos: Vector2) -> void:
 		return
 	# Drag — compute end cell
 	var end_hit = _pick_face_cell(final_pos)
-	if end_hit.is_empty():
-		return
-	var end_face = end_hit.face
-	var end_cell = Vector2i(end_hit.x, end_hit.y)
-	# Same face drag?
+	var end_face = -1
+	var end_cell = Vector2i(-1, -1)
+	if not end_hit.is_empty():
+		end_face = end_hit.face
+		end_cell = Vector2i(end_hit.x, end_hit.y)
+	# Same face drag (started on a gem, ended on same face)?
 	if _drag_gem_face >= 0 and end_face == _drag_gem_face:
 		var dx = int(end_cell.x) - int(_drag_gem_cell.x)
 		var dy = int(end_cell.y) - int(_drag_gem_cell.y)
@@ -805,10 +817,11 @@ func _finalize_drag(final_pos: Vector2) -> void:
 		else:
 			# Deselect and reselect the new cell
 			_clear_selection()
-			selected = {"face": end_face, "x": end_cell.x, "y": end_cell.y}
-			_apply_selection_scale()
+			if not end_hit.is_empty():
+				selected = {"face": end_face, "x": end_cell.x, "y": end_cell.y}
+				_apply_selection_scale()
 	else:
-		# Drag started on empty area: camera turn.
+		# Drag started on empty area OR cross-face: camera turn.
 		# Simple heuristic: horizontal drag → yaw, vertical → pitch.
 		var dx = delta.x
 		var dy = delta.y
