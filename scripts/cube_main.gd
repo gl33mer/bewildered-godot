@@ -50,24 +50,24 @@ var stone_material: StandardMaterial3D
 var ice_material: StandardMaterial3D
 var plate_material: StandardMaterial3D
 var paper_material: StandardMaterial3D
-var selected := {} # {face, x, y}
-var busy := false
-var _touch_device := false
-var _drag_start := Vector2.ZERO
-var _drag_gem_face := -1
-var _drag_gem_cell := Vector2i(-1, -1)
+var selected: Dictionary = {} # {face, x, y}
+var busy: bool = false
+var _touch_device: bool = false
+var _drag_start: Vector2 = Vector2.ZERO
+var _drag_gem_face: int = -1
+var _drag_gem_cell: Vector2i = Vector2i(-1, -1)
 # Pinch-to-zoom tracking.
-var _pinch_touch1 := -1
-var _pinch_touch2 := -1
-var _pinch_touch1_pos := Vector2.ZERO
-var _pinch_touch2_pos := Vector2.ZERO
-var _pinch_start_dist := 0.0
-var _pinch_start_zoom := 1.0
-var _debug_shatter := false
-var _debug_beam := false
-var _debug_shockwave := false
-var _debug_selection := false
-var _debug_facespin := false
+var _pinch_touch1: int = -1
+var _pinch_touch2: int = -1
+var _pinch_touch1_pos: Vector2 = Vector2.ZERO
+var _pinch_touch2_pos: Vector2 = Vector2.ZERO
+var _pinch_start_dist: float = 0.0
+var _pinch_start_zoom: float = 1.0
+var _debug_shatter: bool = false
+var _debug_beam: bool = false
+var _debug_shockwave: bool = false
+var _debug_selection: bool = false
+var _debug_facespin: bool = false
 var status_label: Label
 var faces_root: Node3D
 
@@ -250,10 +250,6 @@ func _build_materials() -> void:
 	stone_material.albedo_color = Color("6a6f78")
 	stone_material.roughness = 0.95
 
-	paper_material = StandardMaterial3D.new()
-	paper_material.albedo_color = Color("f2efe6")
-	paper_material.roughness = 0.75
-
 	ice_material = StandardMaterial3D.new()
 	ice_material.albedo_color = Color(0.62, 0.83, 0.98, 0.6)
 	ice_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -265,6 +261,10 @@ func _build_materials() -> void:
 	plate_material = StandardMaterial3D.new()
 	plate_material.albedo_color = Color("181d2e")
 	plate_material.roughness = 0.85
+
+	paper_material = StandardMaterial3D.new()
+	paper_material.albedo_color = Color("f2efe6")
+	paper_material.roughness = 0.75
 
 	_build_icon_assets()
 
@@ -361,7 +361,7 @@ func _build_hud() -> void:
 	version_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	version_label.add_theme_constant_override("outline_size", 2)
 	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	version_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_CENTER)
+	version_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	version_label.position = Vector2(0, 12)
 	layer.add_child(version_label)
 
