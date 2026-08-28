@@ -859,10 +859,11 @@ func _finalize_drag(final_pos: Vector2) -> void:
 	if _drag_gem_face >= 0 and end_face == _drag_gem_face:
 		var dx = int(end_cell.x) - int(_drag_gem_cell.x)
 		var dy = int(end_cell.y) - int(_drag_gem_cell.y)
+		# Only allow orthogonal swaps (Manhattan distance == 1)
 		if abs(dx) + abs(dy) == 1:
 			_attempt_swap(_drag_gem_face, _drag_gem_cell.x, _drag_gem_cell.y, end_cell.x, end_cell.y)
 		else:
-			# Deselect and reselect the new cell
+			# Diagonal or multi-cell drag rejected - just deselect
 			_clear_selection()
 			if not end_hit.is_empty():
 				selected = {"face": end_face, "x": end_cell.x, "y": end_cell.y}

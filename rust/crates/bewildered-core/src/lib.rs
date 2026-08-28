@@ -787,13 +787,13 @@ impl Board {
                 }
             }
 
-            // Clear extra cells from detonations/specials
-            for (r, c) in &extra_clear_cells {
-                let (rr, cc) = (*r, *c);
-                if let Some(kind) = self.gem(rr, cc).map(|g| g.kind) {
-                    self.cleared_this_move.push((rr, cc, kind));
-                    round_clears.push((rr, cc, kind));
-                    self.remove_gem(rr, cc);
+            // Deduplicate extra_clear_cells to avoid clearing the same cell multiple times
+            let unique_extra_clears: std::collections::HashSet<(usize, usize)> = extra_clear_cells.iter().cloned().collect();
+            for (r, c) in unique_extra_clears {
+                if let Some(kind) = self.gem(r, c).map(|g| g.kind) {
+                    self.cleared_this_move.push((r, c, kind));
+                    round_clears.push((r, c, kind));
+                    self.remove_gem(r, c);
                 }
             }
 
