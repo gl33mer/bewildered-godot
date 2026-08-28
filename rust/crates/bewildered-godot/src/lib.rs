@@ -28,7 +28,7 @@ pub struct BoardSim {
 #[godot_api]
 impl BoardSim {
     #[signal]
-    fn match_resolved(cleared_cells: Array<Vector2i>, gem_kind: i32, cascade_depth: i32);
+    fn match_resolved(cleared_cells: Array<Vector2i>, gem_kinds: Array<i32>, cascade_depth: i32);
 
     #[signal]
     fn special_gem_created(pos: Vector2i, kind: i32);
@@ -281,14 +281,14 @@ impl BoardSim {
             if let MoveOutcome::Success { clears_by_depth, .. } = outcome {
                 for (cascade_idx, depth_cells) in clears_by_depth.iter().enumerate() {
                     let mut cleared_cells = Array::new();
-                    let mut kind = 0i32;
+                    let mut gem_kinds = Array::new();
                     for &(row, col, gk) in depth_cells {
                         cleared_cells.push(Vector2i::new(col as i32, row as i32));
-                        kind = gk as i32;
+                        gem_kinds.push(gk as i32);
                     }
                     if !cleared_cells.is_empty() {
                         match_signals
-                            .push((cleared_cells, kind, cascade_idx as i32 + 1));
+                            .push((cleared_cells, gem_kinds, cascade_idx as i32 + 1));
                     }
                 }
             }
@@ -621,7 +621,7 @@ impl IRefCounted for CubeSim {
 #[godot_api]
 impl CubeSim {
     #[signal]
-    fn cube_match_resolved(face: i32, cleared_cells: Array<Vector2i>, gem_kind: i32, cascade_depth: i32);
+    fn cube_match_resolved(face: i32, cleared_cells: Array<Vector2i>, gem_kinds: Array<i32>, cascade_depth: i32);
 
     #[signal]
     fn cube_special_gem_created(face: i32, pos: Vector2i, kind: i32);
@@ -909,23 +909,24 @@ impl CubeSim {
 
         // One match_resolved per (cascade depth, face) group.
         for (depth, depth_cells) in outcome.clears_by_depth.iter().enumerate() {
-            let mut groups: std::collections::BTreeMap<i32, (Array<Vector2i>, i32)> =
+            let mut groups: std::collections::BTreeMap<i32, (Array<Vector2i>, Array<i32>)> =
                 std::collections::BTreeMap::new();
             for (cell, kind) in depth_cells {
                 let (f, x, y) = {
                     let cube = self.cube.as_ref().unwrap();
                     cube.coords(*cell)
                 };
-                let entry = groups.entry(f as i32).or_insert_with(|| (Array::new(), *kind as i32));
+                let entry = groups.entry(f as i32).or_insert_with(|| (Array::new(), Array::new()));
                 entry.0.push(Vector2i::new(x as i32, y as i32));
+                entry.1.push(*kind as i32);
             }
-            for (face, (cells, kind)) in groups {
+            for (face, (cells, kinds)) in groups {
                 self.base_mut().emit_signal(
                     "cube_match_resolved",
                     &[
                         face.to_variant(),
                         cells.to_variant(),
-                        kind.to_variant(),
+                        kinds.to_variant(),
                         (depth as i32 + 1).to_variant(),
                     ],
                 );

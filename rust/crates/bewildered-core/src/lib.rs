@@ -499,16 +499,17 @@ impl Board {
         self.cleared_this_move.clear();
 
         // Process matches and cascades with echo detonation
+        let initial_matches = self.find_all_matches();
         let (total_cascades, clears_by_depth) =
-            self.process_matches(self.find_all_matches());
+            self.process_matches(initial_matches.clone());
 
         let resonance_mult = self.resonance_multiplier;
 
         MoveOutcome::Success {
-            matches: self.find_all_matches(), // Re-evaluate after cascades
+            matches: initial_matches,
             cascades: total_cascades,
             resonance_multiplier: self.resonance_multiplier,
-            clears_by_depth: Vec::new(), // Simplified
+            clears_by_depth,
         }
     }
 

@@ -306,9 +306,8 @@ impl Topology for Cube6Face {
 
 /// Seam-aware contiguous-run detection over any [`Topology`].
 ///
-/// Scans only `Right` and `Down` directions to find each line exactly once.
-/// Reports runs of `min_run` or more equal gems. Runs may freely cross
-/// face seams on a [`Cube6Face`].
+/// Scans for maximal horizontal and vertical runs independently to correctly
+/// detect intersecting runs (T-shapes, L-shapes, crosses).
 ///
 /// `gems[c]` is `Some(kind)` for an occupied cell, `None` for empty.
 pub fn find_line_runs(
@@ -320,37 +319,31 @@ pub fn find_line_runs(
     if gems.len() != topology.cell_count() {
         return runs;
     }
-    // Only scan Right and Down to avoid double-counting lines.
-    let dirs = [Direction::Right, Direction::Down];
-    let mut visited = vec![false; gems.len()];
+
+    // Scan horizontal runs (Right direction)
     for start in 0..gems.len() {
         let start = CellId(start as u32);
-        if visited[start.0 as usize] {
-            continue;
-        }
-        for &dir in &dirs {
-            let kind = match gems[start.0 as usize] {
-                Some(k) => k,
-                None => continue,
-            };
-            // Walk the line collecting the run.
-            let mut line = vec![start];
+        // Check if this is the start of a horizontal run (no same-kind gem to the left)
+        if let Some(kind) = gems[start.0 as usize] {
+            // Check if there's a same-kind gem to the left
+            if let Some((left, _)) = topology.step(start, Direction::Left) {
+                if gems[left.0 as usize] == Some(kind) {
+                    continue; // Not the start of a run
+                }
+            }
+            // Walk right to find the run
+            let mut line = vec![CellId(start.0)];
             let mut cur = start;
-            let mut cur_dir = dir;
-            let mut seen_in_scan = std::collections::HashSet::new();
-            seen_in_scan.insert(start.0);
+            let mut cur_dir = Direction::Right;
             loop {
                 match topology.step(cur, cur_dir) {
-                    Some((next, ndir)) => {
-                        if gems[next.0 as usize] != Some(kind) {
-                            break;
-                        }
-                        if !seen_in_scan.insert(next.0) {
+                    Some((next, _)) => {
+                        if gems[next.0 as usize] != Some(gems[start.0 as usize].unwrap()) {
                             break;
                         }
                         line.push(next);
                         cur = next;
-                        cur_dir = ndir;
+                        cur_dir = Direction::Right;
                         if line.len() > topology.cell_count() {
                             break;
                         }
@@ -358,12 +351,45 @@ pub fn find_line_runs(
                     None => break,
                 }
             }
-            // Mark all cells in this line as visited so we don't start from them again.
-            for &c in &line {
-                visited[c.0 as usize] = true;
+            if line.len() >= min_run {
+                runs.push((line, gems[start.0 as usize].unwrap()));
+            }
+        }
+    }
+
+    // Scan vertical runs (Down direction)
+    for start in 0..gems.len() {
+        let start = CellId(start as u32);
+        // Check if this is the start of a vertical run (no same-kind gem above)
+        if let Some(kind) = gems[start.0 as usize] {
+            // Check if there's a same-kind gem above
+            if let Some((up, _)) = topology.step(start, Direction::Up) {
+                if gems[up.0 as usize] == Some(kind) {
+                    continue; // Not the start of a run
+                }
+            }
+            // Walk down to find the run
+            let mut line = vec![CellId(start.0)];
+            let mut cur = start;
+            let mut cur_dir = Direction::Down;
+            loop {
+                match topology.step(cur, cur_dir) {
+                    Some((next, _)) => {
+                        if gems[next.0 as usize] != Some(gems[start.0 as usize].unwrap()) {
+                            break;
+                        }
+                        line.push(next);
+                        cur = next;
+                        cur_dir = Direction::Down;
+                        if line.len() > topology.cell_count() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
             }
             if line.len() >= min_run {
-                runs.push((line, kind));
+                runs.push((line, gems[start.0 as usize].unwrap()));
             }
         }
     }
