@@ -109,6 +109,7 @@ func _ready() -> void:
 
 	camera = CubeSnapCamera.new()
 	add_child(camera)
+	camera.make_current()
 
 	_build_hud()
 
